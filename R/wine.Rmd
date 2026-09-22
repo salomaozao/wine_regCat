@@ -34,7 +34,11 @@ pacman::p_load(
     brant, # teste de Brant
     car, # diagnosticos
     broom, # saidas em data.frame
-    tidyverse
+    scales, # formatacao de escalas e moeda para graficos
+    ggstatsplot, # violino estruturado com estatisticas e testes integrados
+    tidyverse,
+    leaflet, # Mapas
+    sf
 )
 ```
 
@@ -44,8 +48,8 @@ pacman::p_load(
 # Os pontos de corte saem dos quantis empíricos de `points`, não de valores fixos.
 K_CAT <- 5
 
-raw <- import(here("data", "wine.csv")) |>
-    select(-c(1, description, designation))
+raw <- import(here("data", "winemagv2.csv")) |>
+    select(-c(1, description, designation, region_1, region_2))
 
 
 # Obtém Quantis
@@ -68,17 +72,179 @@ df <- raw |>
         across(where(is.character), as.factor)
     )
 
-View(df)
-unique(df$points)
+glimpse(df)
+
 ```
 
 
 
 Inicialmente apresente uma rápida análise descritiva dos dados utilizados. 
-```{r EDA}
-# Missing data
+```{r EDA-covar-price, fig.width=9, fig.height=5, fig.align='center', dpi=300}
+#| label: fig-price-ordinal
+#| fig-cap: "Distribuição do Preço por Categoria Ordinal de Qualidade"
+#| fig-width: 9
+#| fig-height: 5
+#| fig-align: "center"
+#| dpi: 300
+#| out-width: "90%"
 
-# Covars
+# Preparação dos dados da covariável contínua chave: price (preço em US$)
+# Filtramos observações com preço disponível e calculamos estatísticas por nível ordinal
+df_preco <- df |>
+    filter(!is.na(price))
+
+resumo_mediana <- df_preco |>
+    group_by(points) |>
+    summarise(
+        mediana = median(price),
+        q25 = quantile(price, 0.25),
+        q75 = quantile(price, 0.75),
+        n = n(),
+        .groups = "drop"
+    )
+
+paleta_vinho <- c("#D9A5B3", "#B86B77", "#9E3D52", "#7A182F", "#4A0E17")
+
+# /==============================/
+
+# Visualização: Violino + Boxplot com outliers como pontos e todos os valores inclusos
+p_covar <- ggplot(df_preco, aes(x = points, y = price, fill = points)) +
+    # Densidade da distribuição
+    geom_violin(alpha = 0.45, color = "gray40", trim = TRUE, scale = "width") +
+
+    # Boxplot com outliers
+    geom_boxplot(
+        width = 0.25,
+        fill = "white",
+        color = "gray15",
+        alpha = 0.85,
+        outlier.shape = 16, # Outliers como pontos visíveis
+        outlier.size = 3, # Tamanho legível no slide
+        outlier.alpha = 0.1, # Transparência para exibir densidade de sobreposição
+        outlier.color = "#75454c" # Tom de vinho alinhado à paleta
+    ) +
+
+    # Marcador dourado da mediana
+    stat_summary(fun = median, geom = "point", shape = 21, size = 3.2, fill = "#B86B77", color = "black") +
+
+    # Rótulo em de valor pra mediana
+    geom_label(
+        data = resumo_mediana,
+        aes(x = points, y = mediana, label = scales::dollar(mediana)),
+        fill = "white",
+        color = "black",
+        fontface = "bold",
+        size = 3.8,
+        vjust = -0.8,
+        label.padding = unit(0.2, "lines")
+    ) +
+
+    # Escala logarítmica
+    scale_y_log10(
+        breaks = c(4, 10, 25, 50, 100, 250, 500, 1000, 2300),
+        labels = scales::dollar_format(),
+        expand = expansion(mult = c(0.05, 0.1))
+    ) +
+    scale_fill_manual(values = paleta_vinho) +
+    labs(
+        title = "Distribuição do Preço por Faixa de Pontuação (Qualidade)",
+        subtitle = "Escala logarítmica com outliers em pontos e todos os valores inclusos (US$ 4 a US$ 2.300)",
+        x = "Categoria Ordinal de Qualidade (Pontos)",
+        y = "Preço da Garrafa (US$ - Escala Log)",
+        caption = "Fonte: Wine Reviews Dataset | 100% dos registros com preço válido inclusos (N = 137.235)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+        legend.position = "none",
+        plot.title = element_text(face = "bold", size = 16, color = "#2C1820"),
+        plot.subtitle = element_text(size = 12, color = "gray30", margin = margin(b = 10)),
+        axis.title.x = element_text(face = "bold", margin = margin(t = 10)),
+        axis.title.y = element_text(face = "bold", margin = margin(r = 10)),
+        axis.text = element_text(size = 12, color = "gray20"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.margin = margin(12, 12, 12, 12)
+    )
+
+
+p_covar
+# /==============================/
+```
+
+```{r EDA-mapa-qualidade, fig.width=10, fig.height=5.2, dpi=300}
+#| label: fig-mapa-qualidade
+#| fig-cap: "Distribuição Espacial Global da Qualidade Média dos Vinhos por País"
+
+# 1. Carregar Shapefile das fronteiras mundiais
+mapa_mundo <- st_read(here("data", "world-administrative-boundaries"), quiet = TRUE) |>
+    select(name = English_Nam, geometry)
+
+# 2. Dicionário de harmonização com a nomenclatura oficial do shapefile
+# Corrige US -> "United States of America", England -> "U.K. of Great Britain and Northern Ireland", etc.
+de_para_paises <- c(
+    "US"                     = "United States of America",
+    "England"                = "U.K. of Great Britain and Northern Ireland",
+    "Moldova"                = "Moldova, Republic of",
+    "Macedonia"              = "The former Yugoslav Republic of Macedonia",
+    "Bosnia and Herzegovina" = "Bosnia & Herzegovina",
+    "South Korea"            = "Republic of Korea"
+)
+
+# 3. Resumir qualidade por país produtor
+df_pais <- df |>
+    filter(!is.na(points), country != "", country != "US-France") |>
+    mutate(
+        country_map = coalesce(de_para_paises[as.character(country)], as.character(country))
+    ) |>
+    group_by(country_map) |>
+    summarise(
+        qualidade_media = mean(as.numeric(points), na.rm = TRUE),
+        n_avaliacoes = n(),
+        .groups = "drop"
+    )
+
+# 4. Join espacial e projeção Robinson (elegante e com menor distorção visual)
+mapa_vinho <- mapa_mundo |>
+    filter(name != "Antarctica") |>
+    left_join(df_pais, by = c("name" = "country_map")) |>
+    st_transform(crs = "+proj=robin")
+
+# Paleta contínua enológica: Champagne -> Rosé -> Rubi -> Tinto Profundo
+paleta_vinho_mapa <- c("#F5EBE6", "#E0B0BA", "#B86B77", "#8A1C36", "#4A0E17")
+
+# 5. Visualização do Mapa Coroplético
+p_mapa <- ggplot(mapa_vinho) +
+    geom_sf(aes(fill = qualidade_media), color = "white", linewidth = 0.2) +
+    scale_fill_gradientn(
+        colors = paleta_vinho_mapa,
+        na.value = "#ECECED", # Cinza claro neutro para países sem dados
+        limits = c(1.8, 3.4),
+        breaks = seq(2.0, 3.4, 0.4),
+        name = "Classe Média de Qualidade (1 a 5)",
+        guide = guide_colorbar(
+            barwidth = unit(7.5, "cm"),
+            barheight = unit(0.35, "cm"),
+            title.position = "top",
+            title.hjust = 0.5,
+            frame.colour = "gray75"
+        )
+    ) +
+    labs(
+        title = "Distribuição Global da Qualidade dos Vinhos",
+        subtitle = "Média da categoria ordinal de qualidade avaliada por país produtor (47 países)",
+        caption = "Fonte: Wine Reviews Dataset | Projeção Robinson | Países em cinza claro não possuem registros."
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+        legend.position = "bottom",
+        plot.title = element_text(face = "bold", size = 14, color = "#2C1820"),
+        plot.subtitle = element_text(size = 10.5, color = "gray30", margin = margin(b = 8)),
+        plot.caption = element_text(size = 8, color = "gray50", margin = margin(t = 6)),
+        panel.grid = element_line(color = "gray92", linetype = "solid", linewidth = 0.2),
+        plot.margin = margin(6, 6, 6, 6)
+    )
+
+p_mapa
 ```
 
 
@@ -92,8 +258,6 @@ Verifique a suposição de chances proporcionais e proponha um modelo mais adequ
 
 Faca o ajuste de modelos de regressão para dados ordinais, efetuando seleção de variáveis e interpretando os resultados obtidos.
 ```{r fit-ordinal}
-ibrary(VGAM)
-
 # Ajuste com a parametrização de sinal do Agresti3
 modelo_vgam <- vglm(
     happy ~ trauma + race,

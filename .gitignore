@@ -6,3 +6,10 @@ docs/slides/
 .RData
 .Ruserdata
 .Rproj.user/
+
+# Arquivos pesados / temporários de dados e downloads
+data/*.zip
+data/*.kml
+data/winemagv2.csv
+data/world-administrative-boundaries.csv
+data/world-administrative-boundaries(1)/
