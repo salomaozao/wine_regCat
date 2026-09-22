@@ -1,0 +1,123 @@
+---
+title: "Regressão para dados ordinais: avaliação de vinhos"
+subtitle: "Trabalho 1 - Regressão para Dados Categóricos e Ordinais"
+author: "Grupo X"
+date: "`r format(Sys.Date(), '%d/%m/%Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+rm(list = ls())
+
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = TRUE,
+    fig.align = "center",
+    fig.width = 7,
+    fig.height = 4
+)
+
+set.seed(262)
+
+
+pacman::p_load(
+    here, # caminhos relativos a raiz do projeto
+    rio, # leitura do csv
+    MASS, # polr: modelo de chances proporcionais
+    VGAM, # vglm: chances proporcionais parciais / razao continua
+    brant, # teste de Brant
+    car, # diagnosticos
+    broom, # saidas em data.frame
+    tidyverse
+)
+```
+
+
+```{r get-data}
+# Número de categorias da resposta ordinal: único parâmetro a definir.
+# Os pontos de corte saem dos quantis empíricos de `points`, não de valores fixos.
+K_CAT <- 5
+
+raw <- import(here("data", "wine.csv")) |>
+    select(-c(1, description, designation))
+
+
+# Obtém Quantis
+cortes <- raw$points |>
+    quantile(probs = seq(0, 1, length.out = K_CAT + 1), type = 1, na.rm = TRUE)
+
+print(cortes)
+
+df <- raw |>
+    mutate(
+        points = cut(
+            points,
+            breaks = unique(cortes),
+            include.lowest = TRUE,
+            labels = seq_len(length(unique(cortes)) - 1),
+            ordered_result = TRUE
+        ),
+
+        # todas as covariáveis de texto viram fator (nominal)
+        across(where(is.character), as.factor)
+    )
+
+View(df)
+unique(df$points)
+```
+
+
+
+Inicialmente apresente uma rápida análise descritiva dos dados utilizados. 
+```{r EDA}
+# Missing data
+
+# Covars
+```
+
+
+Verifique a suposição de chances proporcionais e proponha um modelo mais adequado caso ela não seja válida.
+
+```{r validate-assumptions}
+# Chances proporcionais
+# O que fazer se não for válido?
+```
+
+
+Faca o ajuste de modelos de regressão para dados ordinais, efetuando seleção de variáveis e interpretando os resultados obtidos.
+```{r fit-ordinal}
+ibrary(VGAM)
+
+# Ajuste com a parametrização de sinal do Agresti3
+modelo_vgam <- vglm(
+    happy ~ trauma + race,
+    family = cumulative(parallel = TRUE),
+    data = wine
+)
+
+summary(modelo_vgam)
+```
+
+
+Dicotomize a variável resposta (juntando categorias), ajuste um modelo de regressão para dados binários/binomiais e compare os resultados obtidos.
+```{r binomial-fit}
+
+```
+
+```{r compare-fits}
+```
+
+
+```{r residue_analysis}
+
+```
+
+
+```{r results}
+```

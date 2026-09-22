@@ -1,0 +1,8 @@
+# Slides de aulas
+docs/slides/
+
+# Arquivos temporários do R / RStudio
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
