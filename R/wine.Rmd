@@ -171,14 +171,18 @@ p_covar
 # /==============================/
 ```
 
+```{r EDA-mapa-qualidade, fig.width=10, fig.height=5.5, dpi=300}
 ```{r EDA-mapa-qualidade, fig.width=10, fig.height=5.2, dpi=300}
 #| label: fig-mapa-qualidade
+#| fig-cap: "Distribuição Espacial da Qualidade Média dos Vinhos por País"
 #| fig-cap: "Distribuição Espacial Global da Qualidade Média dos Vinhos por País"
 
+# 1. Carregar o Shapefile dos países
 # 1. Carregar Shapefile das fronteiras mundiais
 mapa_mundo <- st_read(here("data", "world-administrative-boundaries"), quiet = TRUE) |>
     select(name = English_Nam, geometry)
 
+# 2. Resumir a qualidade dos vinhos por país produtor
 # 2. Dicionário de harmonização com a nomenclatura oficial do shapefile
 # Corrige US -> "United States of America", England -> "U.K. of Great Britain and Northern Ireland", etc.
 de_para_paises <- c(
@@ -192,10 +196,17 @@ de_para_paises <- c(
 
 # 3. Resumir qualidade por país produtor
 df_pais <- df |>
+    filter(!is.na(points), country != "") |>
     filter(!is.na(points), country != "", country != "US-France") |>
     mutate(
+        country_clean = case_when(
+            as.character(country) == "US" ~ "United States",
+            as.character(country) == "England" ~ "United Kingdom",
+            TRUE ~ as.character(country)
+        )
         country_map = coalesce(de_para_paises[as.character(country)], as.character(country))
     ) |>
+    group_by(country_clean) |>
     group_by(country_map) |>
     summarise(
         qualidade_media = mean(as.numeric(points), na.rm = TRUE),
@@ -203,17 +214,26 @@ df_pais <- df |>
         .groups = "drop"
     )
 
+# 3. Junção do mapa com os dados
 # 4. Join espacial e projeção Robinson (elegante e com menor distorção visual)
 mapa_vinho <- mapa_mundo |>
+    left_join(df_pais, by = c("name" = "country_clean"))
     filter(name != "Antarctica") |>
     left_join(df_pais, by = c("name" = "country_map")) |>
     st_transform(crs = "+proj=robin")
 
+# 4. Gráfico do mapa coroplético de qualidade
 # Paleta contínua enológica: Champagne -> Rosé -> Rubi -> Tinto Profundo
 paleta_vinho_mapa <- c("#F5EBE6", "#E0B0BA", "#B86B77", "#8A1C36", "#4A0E17")
 
 # 5. Visualização do Mapa Coroplético
 p_mapa <- ggplot(mapa_vinho) +
+    geom_sf(aes(fill = qualidade_media), color = "gray75", linewidth = 0.15) +
+    scale_fill_viridis_c(
+        option = "magma",
+        direction = -1,
+        na.value = "#ececec",
+        name = "Qualidade Média\n(Classes 1 a 5)"
     geom_sf(aes(fill = qualidade_media), color = "white", linewidth = 0.2) +
     scale_fill_gradientn(
         colors = paleta_vinho_mapa,
@@ -229,14 +249,22 @@ p_mapa <- ggplot(mapa_vinho) +
             frame.colour = "gray75"
         )
     ) +
+    coord_sf(ylim = c(-55, 85)) +
     labs(
         title = "Distribuição Global da Qualidade dos Vinhos",
+        subtitle = "Média da categoria de pontuação por país produtor",
+        caption = "Fonte: Wine Reviews Dataset"
         subtitle = "Média da categoria ordinal de qualidade avaliada por país produtor (47 países)",
         caption = "Fonte: Wine Reviews Dataset | Projeção Robinson | Países em cinza claro não possuem registros."
     ) +
+    theme_minimal(base_size = 12) +
     theme_minimal(base_size = 11) +
     theme(
         legend.position = "bottom",
+        legend.key.width = unit(1.8, "cm"),
+        plot.title = element_text(face = "bold", size = 15, color = "#2C1820"),
+        plot.subtitle = element_text(color = "gray30", margin = margin(b = 10)),
+        panel.grid.line = element_blank()
         plot.title = element_text(face = "bold", size = 14, color = "#2C1820"),
         plot.subtitle = element_text(size = 10.5, color = "gray30", margin = margin(b = 8)),
         plot.caption = element_text(size = 8, color = "gray50", margin = margin(t = 6)),
