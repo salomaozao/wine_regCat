@@ -67,3 +67,35 @@ Este arquivo registra cronologicamente todas as sessões de trabalho, contexto, 
 **Próxima IA / Handoff:**
 - O mapa de distribuição espacial está 100% integrado, validado e renderizando sem erros no Rmd.
 - Prosseguir com a verificação de chances proporcionais (teste de Brant / LRT) e ajuste do modelo ordinal nos chunks subsequentes de `R/wine.Rmd`.
+
+---
+
+## 2026-09-25 18:35 — docs(planejamento): reestruturacao do PI espelhando secoes do wine.qmd e resolucao da divergencia na 3.2.2
+
+**Autor:** Antigravity / Gemini 3.8 Flash (High) · operador: Gabriel Nascimento
+
+**Contexto:** O usuario solicitou que o Plano de Implementacao (PI) fosse totalmente reformulado para funcionar como um caderno teorico e exploratorio para ele mesmo implementar no R, espelhando fielmente os capitulos e secoes do arquivo wine.qmd, com foco teorico rigoroso e esclarecimento detalhado sobre a divergencia conceitual entre a secao 3.2.2 (ajuste binario) e 3.1 (ajuste ordinal).
+
+**Feito:**
+- Reestruturacao completa de rain/plano_implementacao.md espelhando a arvore de capitulos e secoes do wine.qmd:
+  - Capitulo 1: Introducao, tratamento de variaveis no get-data e justificativa das hipoteses $ a $.
+  - Capitulo 2: Pressupostos ordinais, geometria de retas paralelas, teste de Brant, LR test no VGAM e paradoxo de $ grande ( = 120.975$).
+  - Capitulo 3: Modelagem em 3 frentes:
+    - 3.1: Regressao ordinal acumulada (polr), selecao e diagnosticos de residuos substitutos (sure).
+    - 3.2: Regressao binaria dicotomizada (glm(family = binomial)), diagnosticos e desempenho discriminatorio (ROC / AUC via pROC).
+    - 3.3: Modelo Parcial (PPOM via glm(parallel = FALSE ~ log_price)), resolvendo o modelo misterioso.
+    - 3.4: Tabela comparativa e integradora (compare_fits).
+  - Capitulo 4: Resultados finais, deducao analitica do fator de disparidade entre OR e RR em eventos frequentes com frases equivocadas, e fundamentacao formal dos ganhos da abordagem Bayesiana.
+- Resolucao teorica da divergencia na secao 3.2.2: demonstrado que o codigo atual continha uma duplicacao equivocada de glm(cumulative) da 3.1, e que a dicotomizacao exige glm(family = binomial), com explicacao aprofundada sobre a perda de eficiencia estatistica e a concordancia esperada dos betas pela variavel latente ^*$.
+- Instalacao e validacao dos pacotes sure e pROC no ambiente R.
+- Auditoria e sincronizacao da governanca .brain via manage_brain.py.
+
+**Decisões:**
+- Preservar o codigo em R/wine.qmd sem alteracoes diretas conforme pedido do usuario, deixando o aluno como operador ativo da implementacao.
+- Adocao do PPOM na secao 3.3.2 como solucao metodologica canonica para a quebra de proporcionalidade.
+
+**Pendente / atenção:**
+- O aluno executara a implementacao bloco a bloco no R/wine.qmd seguindo o gabarito e instrucoes do PI.
+
+**Próxima IA / Handoff:**
+- Prestar suporte analitico caso o aluno tenha duvidas durante a escrita dos chunks ou quando iniciar a estruturacao dos 15 slides limpos da apresentacao.

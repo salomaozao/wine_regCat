@@ -59,6 +59,7 @@ cortes <- raw$points |>
 print(cortes)
 
 df <- raw |>
+    # pts
     mutate(
         points = cut(
             points,
@@ -67,17 +68,22 @@ df <- raw |>
             labels = seq_len(length(unique(cortes)) - 1),
             ordered_result = TRUE
         ),
+        log_pts = log(points),
+
+        #  Top 6 países produtores (EUA, França, Itália, Espanha, Portugal, Chile) + "Outros".
+        # Agrupar nas castas mais representativas (Cabernet Sauvignon, Pinot Noir, Chardonnay, Syrah, Bordeaux Blend) e "Demais Variedades"
+
 
         # todas as covariáveis de texto viram fator (nominal)
         across(where(is.character), as.factor)
     )
 
 glimpse(df)
-
 ```
 
 
-
+# Capítulo 1: Introdução
+## EDA
 Inicialmente apresente uma rápida análise descritiva dos dados utilizados. 
 ```{r EDA-covar-price, fig.width=9, fig.height=5, fig.align='center', dpi=300}
 #| label: fig-price-ordinal
@@ -125,7 +131,14 @@ p_covar <- ggplot(df_preco, aes(x = points, y = price, fill = points)) +
     ) +
 
     # Marcador dourado da mediana
-    stat_summary(fun = median, geom = "point", shape = 21, size = 3.2, fill = "#B86B77", color = "black") +
+    stat_summary(
+        fun = median,
+        geom = "point",
+        shape = 21,
+        size = 3.2,
+        fill = "#B86B77",
+        color = "black"
+    ) +
 
     # Rótulo em de valor pra mediana
     geom_label(
@@ -157,7 +170,11 @@ p_covar <- ggplot(df_preco, aes(x = points, y = price, fill = points)) +
     theme(
         legend.position = "none",
         plot.title = element_text(face = "bold", size = 16, color = "#2C1820"),
-        plot.subtitle = element_text(size = 12, color = "gray30", margin = margin(b = 10)),
+        plot.subtitle = element_text(
+            size = 12,
+            color = "gray30",
+            margin = margin(b = 10)
+        ),
         axis.title.x = element_text(face = "bold", margin = margin(t = 10)),
         axis.title.y = element_text(face = "bold", margin = margin(r = 10)),
         axis.text = element_text(size = 12, color = "gray20"),
@@ -172,7 +189,7 @@ p_covar
 ```
 
 ```{r EDA-mapa-qualidade, fig.width=10, fig.height=5.5, dpi=300}
-```{r EDA-mapa-qualidade, fig.width=10, fig.height=5.2, dpi=300}
+
 #| label: fig-mapa-qualidade
 #| fig-cap: "Distribuição Espacial da Qualidade Média dos Vinhos por País"
 #| fig-cap: "Distribuição Espacial Global da Qualidade Média dos Vinhos por País"
@@ -197,7 +214,7 @@ de_para_paises <- c(
 # 3. Resumir qualidade por país produtor
 df_pais <- df |>
     filter(!is.na(points), country != "") |>
-    filter(!is.na(points), country != "", country != "US-France") |>
+    filter(!is.na(points), country != "", country != "US_France") |>
     mutate(
         country_clean = case_when(
             as.character(country) == "US" ~ "United States",
@@ -275,17 +292,100 @@ p_mapa <- ggplot(mapa_vinho) +
 p_mapa
 ```
 
+## Resultados esperados
+* **$H_1$ (Elasticidade Positiva do Preço)**: $\beta_{\log(\text{price})} > 0$. Vinhos mais caros têm chances substantivamente maiores de atingir os estratos mais altos de pontuação. Espera-se uma Razão de Chances acumulada expressiva por dobra de preço ($OR > 2.0$).
+* **$H_2$ (Prêmio de Qualidade do Velho Mundo)**: Condicional a um mesmo patamar de preço, vinhos do Velho Mundo (especialmente França e Itália) tendem a apresentar chances superiores de alcançar faixas de pontuação elevadas devido ao prestígio de suas denominações de origem controlada (AOC, DOCG).
+* **$H_3$ (Rejeição da Suposição de Chances Proporcionais)**: Em decorrência do tamanho amostral elevado ($N > 100.000$) e da dinâmica não linear da relação preço-qualidade, o Teste de Brant e o Teste de Razão de Verossimilhança rejeitarão a hipótese nula de paralelismo estrito ($p < 0,05$). O efeito do preço tende a ser mais acentuado na transição para a categoria superlativa ($\ge 92$ ou $\ge 95$ pts) do que nas transições inferiores.
+* **$H_4$ (Adequação do Modelo de Chances Proporcionais Parciais - PPOM)**: Relaxar o paralelismo apenas para $\log(\text{price})$ ou variáveis violadoras via `VGAM::vglm(..., family = cumulative(parallel = FALSE ~ ...))` proporcionará ganho de ajuste (menor AIC/Deviance) mantendo a interpretabilidade dos efeitos fixos das demais covariáveis.
+* **$H_5$ (Trade-off do Colapsamento Binário)**: A dicotomização em $\ge 90$ pontos preservará a direção dos efeitos, mas sacrificará a capacidade do modelo de discriminar a variabilidade interna das caudas (não distingue 80 de 89, nem 90 de 100), reduzindo a eficiência estatística dos estimadores.
 
+
+
+
+# Capítulo 2: Pressupostos
 Verifique a suposição de chances proporcionais e proponha um modelo mais adequado caso ela não seja válida.
 
 ```{r validate-assumptions}
-# Chances proporcionais
+# Chances proporcionais -> slide 2, teste de Brent |
+
+# pg 17, slide 3
+# | Só podemos fazer se tem 4 ou mais
+# | Único jeito de saber quais betas não tem retas paralelas
+# | Trabalhoso (dá pra fazer tipo um lasso?)
+# | O que quer dizer se dois betas tem as retas paralelas?
+
 # O que fazer se não for válido?
+# O que fazer se for válido? Quais modelos queremos rodar
 ```
 
+# Capítulo 3: Modelagem:
 
+## 3.1 Regressão para dados ordinais
+
+### 3.1.1 Seleção de variáveis
+### 3.1.2 Ajuste
 Faca o ajuste de modelos de regressão para dados ordinais, efetuando seleção de variáveis e interpretando os resultados obtidos.
-```{r fit-ordinal}
+### 3.1.1 Análise de resíduos
+```{r ordinal_selection}
+```
+
+### 3.1.2 Ajuste do modelo
+
+- Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
+- logit[P(Y≤j∣x)] = log( P(Y>j∣x) / P(Y≤j∣x) )
+- Vamos usar variável latente 
+
+- Suposição de chances proporcionais [colocar conta de razção de odds] - Modelo está errado
+```{r ordinal_fit}
+
+# Ajuste com a parametrização de sinal do Agresti3
+modelo_vgam <- vglm(
+    happy ~ trauma + race,
+    family = cumulative(parallel = TRUE),
+    data = wine
+)
+
+summary(modelo_vgam)
+```
+
+**Diagnóstico da Suposição e Alternativas** (Slide 2, p. 89-98):
+  1. *Teste de Brant* (`brant::brant(fit_polr)`): Testa individualmente cada covariável e omnibus via estatística assintótica $\chi^2$.
+  2. *Teste de Razão de Verossimilhança no VGAM*: Comparar modelo com `parallel = TRUE` vs. `parallel = FALSE` via `lrtest`.
+  3. *O Efeito do Tamanho Amostral $N$* (Slide 2, p. 93-94): Em grandes amostras, testes formais têm poder inflacionado e rejeitam $H_0$ mesmo para diferenças irrelevantes do ponto de vista substantivo. Não se deve descartar o modelo ordinal sumariamente.
+  4. *Modelo de Chances Proporcionais Parciais (PPOM)* (Slide 2, p. 98): Permitir efeitos não-paralelos apenas para a covariável que viola substancialmente a suposição (`parallel = FALSE ~ log_price`).
+  5. *Comparação com Colapsamento* (Slide 2, p. 95-96): Avaliar estabilidade dos $\beta$ entre cortes binários sucessivos.
+
+
+### 3.1.3 Análise de resíduos
+```{r ordinal_res_analysis}
+
+```
+
+## 3.2 Regressão com dados dicotonomizados
+
+Dicotomize a variável resposta (juntando categorias), ajuste um modelo de regressão para dados binários/binomiais e compare os resultados obtidos.
+logit[P(Y≤j∣x)] = \alpha_j - x^t beta
+
+Distribuição: Multinomial Ordinal.
+O sinal negativo do polr faz com que beta>0  indique aumento da probabilidade de notas superiores.
+
+
+### 3.2.1 Seleção de variáveis
+
+
+```{r}
+# Dicotonomizar a variável -> se tá no quantil 10% ou 5% ela vira "padrão ouro" e aí a gente compara com a comum
+
+```
+
+```{r bin_selection}
+```
+
+### 3.2.2 Ajuste do modelo
+```{r bin_fit}
+# Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
+# logit[P(Y≤j∣x)] = log( P(Y>j∣x) / P(Y≤j∣x) )
+
 # Ajuste com a parametrização de sinal do Agresti3
 modelo_vgam <- vglm(
     happy ~ trauma + race,
@@ -297,18 +397,51 @@ summary(modelo_vgam)
 ```
 
 
-Dicotomize a variável resposta (juntando categorias), ajuste um modelo de regressão para dados binários/binomiais e compare os resultados obtidos.
-```{r binomial-fit}
+### 3.2.3 Análise de resíduos
+```{r bin_res_analysis}
 
 ```
 
-```{r compare-fits}
+
+## 3.3 Modelo que roda sem chances porporcionais pq vai bombar cpa
+Verifique a suposicao de chances proporcionais (feito lá atrás) e proponha um modelo mais adequado caso ela não seja válida. 
+### 3.2.1 Seleção de variáveis
+Modelo de Chances Proporcionais Parciais (PPOM - Partial Proportional Odds Model):
+
+Ele não é tão restritivo quanto o POM (parallel = TRUE), nem tão inflacionado em parâmetros quanto o modelo irrestrito (parallel = FALSE). Ele relaxa o paralelismo apenas para a covariável que violou a suposição (log_price).
+
+
+```{r modelo_misterioso_selection}
+```
+
+### 3.3.2 Ajuste do modelo
+```{r modelo_misterioso_fit}
+# Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
+# logit[P(Y≤j∣x)] = log( P(Y>j∣x) / P(Y≤j∣x) )
+
+# Ajuste com a parametrização de sinal do Agresti3
+# No chunk modelo_misterioso_fit:
+fit_ppom <- vglm(
+    points_ord ~ XXXXXXXXX,
+    family = cumulative(parallel = FALSE ~ log_price),
+    data = df
+)
+
+summary(modelo_vgam)
 ```
 
 
-```{r residue_analysis}
+### 3.1.2 Análise de resíduos
+```{r modelo_misterioso_res_analysis}
 
 ```
+
+
+```{r compare_fits}
+```
+
+
+
 
 
 ```{r results}
