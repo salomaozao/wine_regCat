@@ -1,0 +1,558 @@
+---
+title: "Regressão para dados ordinais: avaliação de vinhos"
+subtitle: "Trabalho 1 - Regressão para Dados Categóricos e Ordinais"
+author: "Grupo X"
+date: "`r format(Sys.Date(), '%d/%m/%Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+rm(list = ls())
+
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = TRUE,
+    fig.align = "center",
+    fig.width = 7,
+    fig.height = 4
+)
+
+set.seed(262)
+
+
+pacman::p_load(
+    here, # caminhos relativos a raiz do projeto
+    rio, # leitura do csv
+    MASS, # polr: modelo de chances proporcionais
+    VGAM, # vglm: chances proporcionais parciais / razao continua
+    brant, # teste de Brant
+    car, # diagnosticos
+    broom, # saidas em data.frame
+    scales, # formatacao de escalas e moeda para graficos
+    ggstatsplot, # violino estruturado com estatisticas e testes integrados
+    tidyverse,
+    leaflet, # Mapas
+    sf
+)
+```
+
+```{r get-data}
+# Número de categorias da resposta ordinal: único parâmetro a definir.
+# Os pontos de corte saem dos quantis empíricos de `points`, não de valores fixos.
+K_CAT <- 5
+
+raw <- import(here("data", "winemagv2.csv")) |>
+    select(-c(1, description, designation, region_1, region_2))
+
+
+# Obtém Quantis
+cortes <- raw$points |>
+    quantile(probs = seq(0, 1, length.out = K_CAT + 1), type = 1, na.rm = TRUE)
+
+print(cortes)
+
+df <- raw |>
+    # pts
+    mutate(
+        points = cut(
+            points,
+            breaks = unique(cortes),
+            include.lowest = TRUE,
+            labels = seq_len(length(unique(cortes)) - 1),
+            ordered_result = TRUE
+        ),
+        log_pts = log(points),
+
+        #  Top 6 países produtores (EUA, França, Itália, Espanha, Portugal, Chile) + "Outros".
+        # Agrupar nas castas mais representativas (Cabernet Sauvignon, Pinot Noir, Chardonnay, Syrah, Bordeaux Blend) e "Demais Variedades"
+
+
+        # todas as covariáveis de texto viram fator (nominal)
+        across(where(is.character), as.factor)
+    )
+
+glimpse(df)
+```
+
+# Capítulo 1: Introdução e Análise Exploratória de Dados (EDA)
+
+A modelagem estatística da percepção de qualidade em bens de experiência — tais como vinhos finos — constitui um dos problemas clássicos em econometria hedônica e análise sensorial. O objetivo central deste trabalho é investigar como atributos objetivos de mercado (notadamente o preço de garrafa) e fatores geográficos de denominação de origem (*terroir*) explicam a qualidade percebida de vinhos, avaliada por especialistas e sommeliers da publicação internacional *Wine Enthusiast* (Wine Reviews Dataset).
+
+A variável resposta original consiste na pontuação contínua de degustação na escala de 80 a 100 pontos. Do ponto de vista da modelagem estatística, a adoção de uma estrutura ordinal policotômica ($Y \in \{1, 2, \dots, J\}$) fundamenta-se em razões teóricas e práticas: 1. **Natureza Não-Linear da Percepção Sensorial**: A escala hedônica de degustação humana não possui necessariamente propriedades métricas euclidianas uniformes; a diferença perceptual entre um vinho de 82 e 83 pontos (estrato regular) não equivale em esforço enológico ou valor de mercado à diferença entre um vinho de 97 e 98 pontos (estrato superlativo de culto). 2. **Segmentação Estratificada de Mercado**: No comércio internacional, os vinhos são categorizados em estratos qualitativos distintos ("Comum", "Bom", "Excelente", "Excepcional"), os quais determinam decisões de precificação, posicionamento em adegas e premiações.
+
+A covariável preditora central é o preço de comercialização da garrafa (`price`, em US). Conforme evidenciado na literatura empírica, a distribuição do preço apresenta uma assimetria positiva severa, com valores variando entre US\$ 4,00 e US\$ 3.300,00 por garrafa. A linearização dessa relação no espaço dos logitos exige formalmente a transformação logarítmica $\log(\text{price})$, fundamentada no princípio econômico e sensorial dos retornos marginais decrescentes: um incremento absoluto de US\$ 10,00 produz um impacto expressivo na qualidade quando passamos de US\$ 10,00 para US\$ 20,00 (dobra de investimento e tecnologia de vinificação), mas torna-se marginalmente imperceptível se adicionado a um exemplar de US\$ 500,00.
+
+## 1.1 Distribuição do Preço por Faixa Ordinal de Qualidade
+
+```{r EDA-covar-price, fig.width=9, fig.height=5, fig.align='center', dpi=300}
+#| label: fig-price-ordinal
+#| fig-cap: "Distribuição do Preço por Categoria Ordinal de Qualidade"
+#| fig-width: 9
+#| fig-height: 5
+#| fig-align: "center"
+#| dpi: 300
+#| out-width: "90%"
+
+# Preparação dos dados da covariável contínua chave: price (preço em US$)
+# Filtramos observações com preço disponível e calculamos estatísticas por nível ordinal
+df_preco <- df |>
+    filter(!is.na(price))
+
+resumo_mediana <- df_preco |>
+    group_by(points) |>
+    summarise(
+        mediana = median(price),
+        q25 = quantile(price, 0.25),
+        q75 = quantile(price, 0.75),
+        n = n(),
+        .groups = "drop"
+    )
+
+paleta_vinho <- c("#D9A5B3", "#B86B77", "#9E3D52", "#7A182F", "#4A0E17")
+
+# /==============================/
+
+# Visualização: Violino + Boxplot com outliers como pontos e todos os valores inclusos
+p_covar <- ggplot(df_preco, aes(x = points, y = price, fill = points)) +
+    # Densidade da distribuição
+    geom_violin(alpha = 0.45, color = "gray40", trim = TRUE, scale = "width") +
+
+    # Boxplot com outliers
+    geom_boxplot(
+        width = 0.25,
+        fill = "white",
+        color = "gray15",
+        alpha = 0.85,
+        outlier.shape = 16, # Outliers como pontos visíveis
+        outlier.size = 3, # Tamanho legível no slide
+        outlier.alpha = 0.1, # Transparência para exibir densidade de sobreposição
+        outlier.color = "#75454c" # Tom de vinho alinhado à paleta
+    ) +
+
+    # Marcador dourado da mediana
+    stat_summary(
+        fun = median,
+        geom = "point",
+        shape = 21,
+        size = 3.2,
+        fill = "#B86B77",
+        color = "black"
+    ) +
+
+    # Rótulo em de valor pra mediana
+    geom_label(
+        data = resumo_mediana,
+        aes(x = points, y = mediana, label = scales::dollar(mediana)),
+        fill = "white",
+        color = "black",
+        fontface = "bold",
+        size = 3.8,
+        vjust = -0.8,
+        label.padding = unit(0.2, "lines")
+    ) +
+
+    # Escala logarítmica
+    scale_y_log10(
+        breaks = c(4, 10, 25, 50, 100, 250, 500, 1000, 2300),
+        labels = scales::dollar_format(),
+        expand = expansion(mult = c(0.05, 0.1))
+    ) +
+    scale_fill_manual(values = paleta_vinho) +
+    labs(
+        title = "Distribuição do Preço por Faixa de Pontuação (Qualidade)",
+        subtitle = "Escala logarítmica com outliers em pontos e todos os valores inclusos (US$ 4 a US$ 2.300)",
+        x = "Categoria Ordinal de Qualidade (Pontos)",
+        y = "Preço da Garrafa (US$ - Escala Log)",
+        caption = "Fonte: Wine Reviews Dataset | 100% dos registros com preço válido inclusos (N = 137.235)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+        legend.position = "none",
+        plot.title = element_text(face = "bold", size = 16, color = "#2C1820"),
+        plot.subtitle = element_text(
+            size = 12,
+            color = "gray30",
+            margin = margin(b = 10)
+        ),
+        axis.title.x = element_text(face = "bold", margin = margin(t = 10)),
+        axis.title.y = element_text(face = "bold", margin = margin(r = 10)),
+        axis.text = element_text(size = 12, color = "gray20"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.margin = margin(12, 12, 12, 12)
+    )
+
+
+p_covar
+# /==============================/
+```
+
+## 1.2 Dimensão Espacial e a Heterogeneidade de *Terroir*
+
+Além do investimento financeiro refletido no preço, os fatores edafoclimáticos (composição do solo, insolação, amplitude térmica e pluviosidade), combinados à tradição cultural e às práticas de vinificação — condensados no conceito enológico de *terroir* —, constituem preditores fundamentais da qualidade sensorial do vinho.
+
+No mercado internacional, observa-se uma divisão conceitual e metodológica clássica: \* **Velho Mundo (Europa)**: Caracterizado por países com séculos de tradição vitivinícola (França, Itália, Espanha, Portugal, Alemanha e Áustria), onde a produção é rigidamente regulamentada por legislações de denominação de origem protegida (como *Appellation d'Origine Contrôlée* - AOC e *Denominazione di Origine Controllata e Garantita* - DOCG). Nesses sistemas, a tipicidade geográfica e o método tradicional prevalecem sobre a identidade varietal isolada. \* **Novo Mundo**: Produtores emergentes e consolidados a partir da colonização moderna e inovação tecnológica (Estados Unidos, Chile, Argentina, Austrália, África do Sul e Nova Zelândia), cujas práticas enológicas priorizam a expressão varietal da uva, flexibilidade de corte e técnicas industriais de controle térmico e maturação em carvalho.
+
+O mapa coroplético a seguir espacializa a qualidade média das avaliações em escala global para os 47 países produtores presentes no banco de dados, harmonizados com a malha cartográfica mundial sob projeção Robinson.
+
+```{r EDA-mapa-qualidade, fig.width=10, fig.height=5.5, dpi=300}
+
+#| label: fig-mapa-qualidade
+#| fig-cap: "Distribuição Espacial da Qualidade Média dos Vinhos por País"
+#| fig-cap: "Distribuição Espacial Global da Qualidade Média dos Vinhos por País"
+
+# 1. Carregar o Shapefile dos países
+# 1. Carregar Shapefile das fronteiras mundiais
+mapa_mundo <- st_read(here("data", "world-administrative-boundaries"), quiet = TRUE) |>
+    select(name = English_Nam, geometry)
+
+# 2. Resumir a qualidade dos vinhos por país produtor
+# 2. Dicionário de harmonização com a nomenclatura oficial do shapefile
+# Corrige US -> "United States of America", England -> "U.K. of Great Britain and Northern Ireland", etc.
+de_para_paises <- c(
+    "US"                     = "United States of America",
+    "England"                = "U.K. of Great Britain and Northern Ireland",
+    "Moldova"                = "Moldova, Republic of",
+    "Macedonia"              = "The former Yugoslav Republic of Macedonia",
+    "Bosnia and Herzegovina" = "Bosnia & Herzegovina",
+    "South Korea"            = "Republic of Korea"
+)
+
+# 3. Resumir qualidade por país produtor
+df_pais <- df |>
+    filter(!is.na(points), country != "") |>
+    filter(!is.na(points), country != "", country != "US_France") |>
+    mutate(
+        country_clean = case_when(
+            as.character(country) == "US" ~ "United States",
+            as.character(country) == "England" ~ "United Kingdom",
+            TRUE ~ as.character(country)
+        )
+        country_map = coalesce(de_para_paises[as.character(country)], as.character(country))
+    ) |>
+    group_by(country_clean) |>
+    group_by(country_map) |>
+    summarise(
+        qualidade_media = mean(as.numeric(points), na.rm = TRUE),
+        n_avaliacoes = n(),
+        .groups = "drop"
+    )
+
+# 3. Junção do mapa com os dados
+# 4. Join espacial e projeção Robinson (elegante e com menor distorção visual)
+mapa_vinho <- mapa_mundo |>
+    left_join(df_pais, by = c("name" = "country_clean"))
+    filter(name != "Antarctica") |>
+    left_join(df_pais, by = c("name" = "country_map")) |>
+    st_transform(crs = "+proj=robin")
+
+# 4. Gráfico do mapa coroplético de qualidade
+# Paleta contínua enológica: Champagne -> Rosé -> Rubi -> Tinto Profundo
+paleta_vinho_mapa <- c("#F5EBE6", "#E0B0BA", "#B86B77", "#8A1C36", "#4A0E17")
+
+# 5. Visualização do Mapa Coroplético
+p_mapa <- ggplot(mapa_vinho) +
+    geom_sf(aes(fill = qualidade_media), color = "gray75", linewidth = 0.15) +
+    scale_fill_viridis_c(
+        option = "magma",
+        direction = -1,
+        na.value = "#ececec",
+        name = "Qualidade Média\n(Classes 1 a 5)"
+    geom_sf(aes(fill = qualidade_media), color = "white", linewidth = 0.2) +
+    scale_fill_gradientn(
+        colors = paleta_vinho_mapa,
+        na.value = "#ECECED", # Cinza claro neutro para países sem dados
+        limits = c(1.8, 3.4),
+        breaks = seq(2.0, 3.4, 0.4),
+        name = "Classe Média de Qualidade (1 a 5)",
+        guide = guide_colorbar(
+            barwidth = unit(7.5, "cm"),
+            barheight = unit(0.35, "cm"),
+            title.position = "top",
+            title.hjust = 0.5,
+            frame.colour = "gray75"
+        )
+    ) +
+    coord_sf(ylim = c(-55, 85)) +
+    labs(
+        title = "Distribuição Global da Qualidade dos Vinhos",
+        subtitle = "Média da categoria de pontuação por país produtor",
+        caption = "Fonte: Wine Reviews Dataset"
+        subtitle = "Média da categoria ordinal de qualidade avaliada por país produtor (47 países)",
+        caption = "Fonte: Wine Reviews Dataset | Projeção Robinson | Países em cinza claro não possuem registros."
+    ) +
+    theme_minimal(base_size = 12) +
+    theme_minimal(base_size = 11) +
+    theme(
+        legend.position = "bottom",
+        legend.key.width = unit(1.8, "cm"),
+        plot.title = element_text(face = "bold", size = 15, color = "#2C1820"),
+        plot.subtitle = element_text(color = "gray30", margin = margin(b = 10)),
+        panel.grid.line = element_blank()
+        plot.title = element_text(face = "bold", size = 14, color = "#2C1820"),
+        plot.subtitle = element_text(size = 10.5, color = "gray30", margin = margin(b = 8)),
+        plot.caption = element_text(size = 8, color = "gray50", margin = margin(t = 6)),
+        panel.grid = element_line(color = "gray92", linetype = "solid", linewidth = 0.2),
+        plot.margin = margin(6, 6, 6, 6)
+    )
+
+p_mapa
+```
+
+## Resultados esperados
+
+- $H_1$ (Elasticidade Positiva do Preço): $\beta_{\log(\text{price})} > 0$. Vinhos mais caros têm chances substantivamente maiores de atingir os estratos mais altos de pontuação. Espera-se uma Razão de Chances acumulada expressiva por dobra de preço ($OR > 2.0$).
+- $H_2$ (Prêmio de Qualidade do Velho Mundo): Condicional a um mesmo patamar de preço, vinhos do Velho Mundo (especialmente França e Itália) tendem a apresentar chances superiores de alcançar faixas de pontuação elevadas devido ao prestígio de suas denominações de origem controlada (AOC, DOCG).
+- $H_3$ (Rejeição da Suposição de Chances Proporcionais): Em decorrência do tamanho amostral elevado ($N > 100.000$) e da dinâmica não linear da relação preço-qualidade, o Teste de Brant e o Teste de Razão de Verossimilhança rejeitarão a hipótese nula de paralelismo estrito ($p < 0,05$). O efeito do preço tende a ser mais acentuado na transição para a categoria superlativa ($\ge 92$ ou $\ge 95$ pts) do que nas transições inferiores.
+- $H_4$ (Adequação do Modelo de Chances Proporcionais Parciais - PPOM): Relaxar o paralelismo apenas para $\log(\text{price})$ ou variáveis violadoras via `VGAM::vglm(..., family = cumulative(parallel = FALSE ~ ...))` proporcionará ganho de ajuste (menor AIC/Deviance) mantendo a interpretabilidade dos efeitos fixos das demais covariáveis.
+- $H_5$ (Trade-off do Colapsamento Binário): A dicotomização em $\ge 90$ pontos preservará a direção dos efeitos, mas sacrificará a capacidade do modelo de discriminar a variabilidade interna das caudas (não distingue 80 de 89, nem 90 de 100), reduzindo a eficiência estatística dos estimadores.
+
+# Capítulo 2: Fundamentação Teórica e Pressupostos da Regressão Ordinal
+
+## 2.1 O Modelo de Logitos Acumulados (*Cumulative Logit Model*)
+
+Para uma variável resposta ordinal $Y \in \{1, 2, \dots, J\}$ com $J$ categorias naturalmente ordenadas ($1 < 2 < \dots < J$), a modelagem por regressão multinomial nominal padrão ignora a ordenação e desperdiça graus de liberdade. A abordagem metodológica canônica fundamenta-se nos **logitos acumulados**, que modelam a probabilidade de a resposta situar-se em ou abaixo de determinado limiar $j$: $$\gamma_j(\mathbf{x}) = P(Y \le j \mid \mathbf{x}) = \sum_{k=1}^j \pi_k(\mathbf{x}), \quad j = 1, \dots, J-1$$ onde $\pi_k(\mathbf{x}) = P(Y = k \mid \mathbf{x})$ e $\gamma_J(\mathbf{x}) = 1$.
+
+O logito acumulado é definido como o logaritmo da razão entre a probabilidade de estar no estrato inferior/igual a $j$ e a probabilidade de superá-lo: $$\text{logit}[\gamma_j(\mathbf{x})] = \log\left( \frac{P(Y \le j \mid \mathbf{x})}{1 - P(Y \le j \mid \mathbf{x})} \right) = \log\left( \frac{P(Y \le j \mid \mathbf{x})}{P(Y > j \mid \mathbf{x})} \right), \quad j = 1, \dots, J-1$$
+
+## 2.2 Derivação Rigorosa via Variável Latente Contínua ($Y^*$)
+
+A justificação teórica mais elegante para o modelo de chances proporcionais provém da hipótese de existência de uma variável contínua latente não observável $Y^*$, que quantifica a "propensão latente de excelência sensorial" ou a qualidade intrínseca do vinho (Slide 2, p. 63-68; Agresti, 2013).
+
+Assume-se o modelo de regressão linear para a variável latente: $$Y_i^* = \mathbf{x}_i^T {\beta}^* + \epsilon_i$$ onde $\mathbf{x}_i$ é o vetor de covariáveis, ${\beta}^*$ é o vetor de coeficientes de inclinação latentes e $\epsilon_i$ são erros aleatórios independentes com função de distribuição acumulada (FDA) contínua e simétrica $F(\cdot)$.
+
+A variável ordinal observada $Y_i$ é gerada pelo mapeamento de $Y_i^*$ sobre $J-1$ pontos de corte ordenados (limiares ou *thresholds*) $-\infty = \alpha_0 < \alpha_1 < \alpha_2 < \dots < \alpha_{J-1} < \alpha_J = \infty$: $$Y_i = j \iff \alpha_{j-1} < Y_i^* \le \alpha_j$$
+
+Dessa forma, a probabilidade acumulada condicional de $Y_i$ assumir um valor até a categoria $j$ é dada por: $$P(Y_i \le j \mid \mathbf{x}_i) = P(Y_i^* \le \alpha_j \mid \mathbf{x}_i) = P(\mathbf{x}_i^T {\beta}^* + \epsilon_i \le \alpha_j) = P(\epsilon_i \le \alpha_j - \mathbf{x}_i^T {\beta}^*)$$
+
+Assumindo que $\epsilon_i$ segue a distribuição logística padrão ($\mu = 0, \sigma^2 = \pi^2/3$), cuja FDA é $F(t) = \frac{1}{1 + e^{-t}}$, temos: $$P(Y_i \le j \mid \mathbf{x}_i) = F(\alpha_j - \mathbf{x}_i^T {\beta}^*) = \frac{1}{1 + \exp\left( -(\alpha_j - \mathbf{x}_i^T {\beta}^*) \right)}$$
+
+Aplicando a função inversa da logística ($F^{-1}(p) = \text{logit}(p) = \log\frac{p}{1-p}$), obtém-se diretamente a equação do **Modelo de Logitos Acumulados sob Chances Proporcionais**: $$\text{logit}[P(Y_i \le j \mid \mathbf{x}_i)] = \alpha_j - \mathbf{x}_i^T {\beta}^*$$
+
+### A Convenção de Sinal e a Interpretação de ${\beta}$
+
+Observe a presença do sinal negativo antes de $\mathbf{x}_i^T {\beta}^*$, adotada na parametrização clássica de Agresti e no pacote `MASS::polr`: \* Sob essa convenção, um coeficiente $\beta_k > 0$ significa que o aumento da covariável $x_k$ desloca a distribuição da variável latente $Y^*$ para a direita (valores maiores). \* Esse deslocamento reduz a probabilidade acumulada de categorias inferiores ($P(Y \le j)$) e, correspondentemente, **aumenta a probabilidade de categorias superiores de qualidade (**$P(Y > j)$). \* A Razão de Chances (*Odds Ratio*) de atingir categorias superiores ($Y > j$) associada a um acréscimo unitário em $x_k$ é obtida diretamente por: $$\text{OR}_{>j} = \exp(\beta_k)$$ enquanto a chance acumulada de permanecer em estratos baixos ($Y \le j$) é multiplicada por $\exp(-\beta_k)$.
+
+## 2.3 A Suposição de Chances Proporcionais (*Proportional Odds Assumption*)
+
+A hipótese estrutural do modelo reside no fato de que o vetor de coeficientes \${\\beta}\$ é **rigorosamente constante** para todos os $J-1$ pontos de corte: $${\beta}_1 = {\beta}_2 = \dots = {\beta}_{J-1} = {\beta}$$
+
+Geometricamente, no espaço cartesiano do logito versus qualquer covariável contínua, as equações dos $J-1$ logitos acumulados definem **retas perfeitamente paralelas**, separadas entre si apenas pela distância vertical constante dada pela diferença entre os interceptos $(\alpha_j - \alpha_{j-1})$.
+
+Substantivamente, essa suposição postula que o efeito de dobrar o preço ou de pertencer ao Velho Mundo é invariante ao estrato de qualidade considerado: a magnitude proporcional do ganho de chance na transição de "Regular" para "Bom" é idêntica àquela na transição de "Excelente" para "Excepcional".
+
+## 2.4 Diagnóstico da Suposição e o Paradoxo do $N$ Elevado
+
+A verificação empírica do paralelismo é realizada por dois procedimentos estatísticos complementares: 1. **Teste de Brant (`brant::brant`)**: Ajusta $J-1$ regressões logísticas binárias separadas para os cortes $I(Y > j)$ e testa a hipótese nula conjunta de paralelismo $H_0: {\beta}_1 = {\beta}_2 = \dots = {\beta}_{J-1}$ através de uma forma quadrática de Wald assintoticamente $\chi^2$. O teste decompõe a estatística omnibus em testes univariados para cada covariável individualmente. 2. **Teste da Razão de Verossimilhança (TRV/LRT)**: Compara o modelo restrito com chances proporcionais (`parallel = TRUE`) contra o modelo irrestrito (`parallel = FALSE`) no pacote `VGAM::vglm`, avaliando a estatística $\Delta G^2 = -2(\ell_{\text{restrito}} - \ell_{\text{irrestrito}}) \sim \chi^2_{(J-2)p}$.
+
+> \[!IMPORTANT\] **O Efeito do Tamanho Amostral** $N$ em Testes Formais (Slide 2, p. 93-94): Em conjuntos de dados com amostras massivas ($N > 100.000$ observações), o erro-padrão amostral decai a taxas de $O(1/\sqrt{N})$, resultando em desvios-padrão da ordem de $0,005$. Nessas condições, testes assintóticos (como Brant e TRV) apresentam **poder estatístico excessivo (inflacionado)**, rejeitando a hipótese nula $H_0$ ($p < 10^{-50}$) mesmo diante de flutuações numéricas minúsculas que não possuem relevância sensorial ou substantiva. Conforme advertido por Agresti e nos slides da disciplina, a rejeição estatística do paralelismo estrito em grandes amostras não invalida o modelo ordinal sumariamente; ela orienta a avaliação da estabilidade prática dos parâmetros e justifica o uso do **Modelo de Chances Proporcionais Parciais (PPOM)**.
+
+```{r validate-assumptions}
+# Chances proporcionais -> slide 2, teste de Brent |
+
+# pg 17, slide 3
+# | Só podemos fazer se tem 4 ou mais
+# | Único jeito de saber quais betas não tem retas paralelas
+# | Trabalhoso (dá pra fazer tipo um lasso?)
+# | O que quer dizer se dois betas tem as retas paralelas?
+
+# O que fazer se não for válido?
+# O que fazer se for válido? Quais modelos queremos rodar
+```
+
+# Capítulo 3: Modelagem Estatística
+
+## 3.1 Regressão para Dados Ordinais (Modelo de Chances Proporcionais - POM)
+
+### 3.1.1 Seleção de Variáveis
+
+O princípio metodológico fundamental na construção do modelo é a busca pela **parcimônia estatística**: identificar o subconjunto ótimo de covariáveis que maximize o ajuste e a capacidade preditiva, minimizando o risco de sobreajuste (*overfitting*) e a perda desnecessária de graus de liberdade.
+
+A seleção de variáveis entre modelos aninhados concorrentes é conduzida formalmente através do **Teste da Razão de Verossimilhança (TRV)**, avaliando o decréscimo da *deviance* residual: $$\Delta G^2 = -2(\ell_{\text{reduzido}} - \ell_{\text{completo}}) \sim \chi^2_{\Delta gl}$$ onde $\Delta gl$ representa a diferença no número de parâmetros livres entre os modelos.
+
+Adicionalmente, utilizam-se os critérios de informação penalizada para balancear qualidade de ajuste e complexidade paramétrica: $$\text{AIC} = -2\ell + 2p, \quad \text{BIC} = -2\ell + p \ln(n)$$ onde $p$ é a dimensão do vetor de parâmetros (limiares e coeficientes de inclinação) e $n$ é o tamanho amostral efetivo.
+
+Avalia-se a inclusão progressiva das covariáveis na seguinte estrutura hierárquica: 1. **Modelo Nulo (**$M_0$): Apenas os interceptos de limiar ($\alpha_1, \dots, \alpha_{J-1}$), servindo como linha de base. 2. **Modelo com Preço (**$M_1$): Inclusão de $\log(\text{price})$, testando a hipótese fundamental de elasticidade da qualidade em relação ao investimento econômico. 3. **Modelo com Preço e Terroir (**$M_2$): Inclusão do fator geográfico de origem (`terroir`: Velho Mundo vs. Novo Mundo), testando o prêmio de qualidade associado às denominações históricas após controlar pelo preço. 4. **Modelo Completo (**$M_3$): Inclusão das castas e variedades mais representativas (`variety_top`).
+
+```{r ordinal_selection}
+```
+
+### 3.1.2 Ajuste e Interpretação do Modelo Ordinal
+
+O modelo ordinal sob a suposição de chances proporcionais (*Proportional Odds Model* - POM) é ajustado pelo método de Máxima Verossimilhança via função `MASS::polr` (ou alternativamente via `VGAM::vglm(..., family = cumulative(parallel = TRUE))`).
+
+A equação formal do modelo ajustado expressa-se como: $$\text{logit}[P(Y \le j \mid \mathbf{x})] = \alpha_j - \beta_{\log(\text{price})} \log(\text{price}) - \mathbf{x}_{\text{terroir}}^T {\beta}_{\text{terroir}}, \quad j = 1, \dots, J-1$$
+
+A interpretação probabilística dos componentes estimados segue princípios rigorosos: 1. **Limiares de Corte (**$\hat{\alpha}_1, \dots, \hat{\alpha}_{J-1}$): Representam os logitos acumulados basais quando o log-preço é nulo e a região corresponde à categoria de referência. A ordem estrita $\hat{\alpha}_1 < \hat{\alpha}_2 < \dots < \hat{\alpha}_{J-1}$ é uma exigência teórica que assegura probabilidades acumuladas monotonicamente crescentes ($\gamma_1 < \gamma_2 < \dots < \gamma_{J-1} < 1$). 2. **Razão de Chances Acumulada (**$\text{OR}_{>j}$): Em razão da parametrização de sinal negativo de Agresti, a Razão de Chances de atingir um estrato de qualidade estritamente superior a $j$ por unidade de acréscimo em $x_k$ é: $$\text{OR}_{>j} = \exp(\hat{\beta}_k)$$ Especificamente para a covariável contínua $\log(\text{price})$, uma duplicação no preço de venda da garrafa ($\log(2 \cdot \text{price}) = \log(\text{price}) + \ln(2)$) multiplica a chance de alcançar categorias superiores de qualidade pelo fator: $$\text{OR}_{\text{dobra de preço}} = \exp\left(\hat{\beta}_{\log(\text{price})} \cdot \ln(2)\right) = 2^{\hat{\beta}_{\log(\text{price})}}$$ Esse efeito multiplicativo é idêntico para todos os pontos de corte $j$, em decorrência direta da suposição de paralelismo.
+
+```{r ordinal_fit}
+
+# Ajuste com a parametrização de sinal do Agresti3
+modelo_vgam <- vglm(
+    happy ~ trauma + race,
+    family = cumulative(parallel = TRUE),
+    data = wine
+)
+
+summary(modelo_vgam)
+```
+
+### 3.1.3 Diagnóstico da Suposição e Análise de Resíduos Ordinais
+
+Após o ajuste do modelo de chances proporcionais, a avaliação diagnóstica compreende duas etapas estatísticas indispensáveis:
+
+#### A. Diagnóstico Formal da Proporcionalidade
+
+1.  **Teste de Brant (`brant::brant`)**: Testa a hipótese nula $H_0: {\beta}_1 = \dots = {\beta}_{J-1}$ globalmente (teste omnibus) e individualmente para cada preditor via estatística de Wald assintótica $\chi^2$.
+2.  **Teste da Razão de Verossimilhança no VGAM**: Compara o ajuste do modelo restrito com chances proporcionais (`parallel = TRUE`) contra o modelo irrestrito (`parallel = FALSE`) através de `VGAM::lrtest()`.
+3.  **Avaliação Prática em Amostras Grandes (**$N \approx 120.000$): Conforme destacado na fundamentação teórica (Slide 2, p. 93-94), a rejeição assintótica de $H_0$ sob amostras massivas não implica o descarte sumário do modelo ordinal. Deve-se avaliar a magnitude prática das discrepâncias entre os coeficientes dos cortes sucessivos.
+
+#### B. A Falência dos Resíduos Convencionais e os Resíduos Substitutos (*Surrogate Residuals*)
+
+Em modelos ordinais, resíduos tradicionais (brutos, de Pearson ou de deviance) não possuem distribuição contínua. Como a resposta observada $Y \in \{1, \dots, J\}$ assume apenas valores discretos e finitos, os gráficos de resíduos contra valores ajustados ou covariáveis formam **bandas paralelas discretas artificiais** (*striping effect*). Essa propriedade inviabiliza diagnósticos gráficos clássicos, impossibilitando a verificação visual de normalidade, heterocedasticidade ou curvatura funcional (Slide 3, p. 12-14).
+
+Para superar essa limitação metodológica, adota-se a abordagem dos **Resíduos Substitutos (*Surrogate Residuals*)** desenvolvida por Liu & Zhang (JASA, 2017) e implementada no pacote `sure`: \* Recupera-se a formulação da variável contínua latente $Y^* = \mathbf{x}^T {\beta}^* + \epsilon$, onde $\epsilon \sim \text{Logística}(0, 1)$. \* Dado que a categoria observada é $Y_i = j$, sabe-se que a variável latente não observável está restrita ao intervalo $(\alpha_{j-1}, \alpha_j]$. \* Simula-se estocasticamente uma variável contínua substituta $S_i$ a partir da distribuição logística condicional truncada: $$S_i \mid (Y_i = j, \mathbf{x}_i) \sim \text{Logística}(\mathbf{x}_i^T {\beta}^*, 1) \mathbb{I}(\alpha_{j-1} < S_i \le \alpha_j)$$ \* O resíduo substituto contínuo é definido por: $$R_i = S_i - \mathbf{x}_i^T {\beta}^*$$ \* Teorema de Liu & Zhang (2017): Sob a correta especificação do modelo, $R_i$ segue exatamente a distribuição logística padrão contínua, permitindo a construção de: 1. **QQ-Plot dos Resíduos Substitutos**: Avalia a adequação da função de ligação logística em relação à normalidade latente. 2. **Resíduos vs. Valores Ajustados**: Diagnóstico de homocedasticidade e variância latente constante. 3. **Resíduos vs.** $\log(\text{price})$: Verificação empírica da linearidade funcional da covariável contínua.
+
+```{r ordinal_res_analysis}
+
+```
+
+## 3.2 Regressão com Dados Dicotomizados (Colapsamento Binário)
+
+### 3.2.1 Justificativa Teórica e Seleção de Variáveis
+
+A dicotomização de uma resposta ordinal consiste no agrupamento das $J$ categorias em uma variável binária indicadora: $$Y_{bin} = \mathbb{I}(\text{points} \ge 90) = \begin{cases} 1, & \text{se } \text{points} \ge 90 \text{ (Vinho de Excelência / Padrão Ouro)} \\ 0, & \text{se } \text{points} < 90 \text{ (Vinho Comercial Comum)} \end{cases}$$
+
+No mercado internacional de vinhos, a barreira dos 90 pontos representa o divisor de águas comercial (o prestigiado *"90+ Points Club"* consolidado pelas revistas *Wine Spectator*, *Robert Parker's Wine Advocate* e *Wine Enthusiast*). Vinhos que alcançam essa marca desfrutam de forte valorização patrimonial, maior liquidez e ampla cobertura da crítica especializada.
+
+#### O Custo Estatístico do Colapsamento (Perda de Eficiência vs. Simplicidade)
+
+Embora a formulação binária seja intuitiva para comunicação corporativa, a literatura estatística adverte sobre os severos custos metodológicos da dicotomização de escalas ordinais (Slide 2, p. 95-97; Agresti, 2013): 1. **Perda de Eficiência Estatística e Inflação de Variância**: O colapsamento descarta integralmente a variação interna dos dados. Trata uma garrafa de 80 pontos (regular) como equivalente a uma de 89 pontos (muito boa), e um vinho de 90 pontos (excelente) como idêntico a um exemplar histórico de 100 pontos (perfeição sensorial). Essa destruição de variabilidade reduz a informação de Fisher, inflando a variância assintótica dos estimadores ($\text{Var}(\hat{{\beta}}_{bin}) > \text{Var}(\hat{{\beta}}_{ord})$) e diminuindo o poder dos testes de hipótese. 2. **Concordância com a Variável Latente** $Y^*$: Sob a hipótese de que a qualidade latente contínua $Y^* = \mathbf{x}^T {\beta}^* + \epsilon$ governa a resposta, a dicotomização em 90 pontos equivale a observar o evento $Y^* > \alpha_{90}$. Dessa forma, se a premissa de proporcionalidade for razoavelmente satisfeita, o estimador logístico binário $\hat{{\beta}}_{bin}$ converge para o mesmo parâmetro latente ${\beta}^*$. Espera-se, portanto, que a magnitude e o sinal de $\hat{\beta}_{\log(\text{price})}$ no modelo binário sejam congruentes com a estimativa do modelo ordinal correspondente.
+
+```{r}
+# Dicotonomizar a variável -> se tá no quantil 10% ou 5% ela vira "padrão ouro" e aí a gente compara com a comum
+
+```
+
+```{r bin_selection}
+```
+
+### 3.2.2 Ajuste do Modelo de Regressão Logística Binária
+
+Para modelar a probabilidade condicional de uma garrafa alcançar o estrato de excelência ($P(Y_{bin} = 1 \mid \mathbf{x})$), adota-se um Modelo Linear Generalizado (GLM) sob a família binomial com função de ligação logito: $$Y_{bin, i} \mid \mathbf{x}_i \sim \text{Bernoulli}(\pi_i)$$ $$\text{logit}[\pi_i] = \log\left( \frac{\pi_i}{1 - \pi_i} \right) = \beta_0 + \beta_{\log(\text{price})} \log(\text{price}_i) + \mathbf{x}_{\text{terroir}, i}^T {\beta}_{\text{terroir}}$$
+
+Diferentemente do modelo ordinal (que estima $J-1$ limiares $\alpha_j$ sob sinal negativo na convenção de Agresti), o modelo binário possui um **único intercepto global** $\beta_0$ e segue a parametrização padrão do GLM: \* O coeficiente $\beta_{\log(\text{price})} > 0$ indica que o logaritmo da chance de pertencer à categoria premium aumenta com o preço. \* A Razão de Chances (*Odds Ratio*) de atingir a nota $\ge 90$ associada a uma duplicação no preço de comercialização da garrafa é dada por: $$\text{OR}_{90+} = \exp\left( \hat{\beta}_{\log(\text{price})} \cdot \ln(2) \right) = 2^{\hat{\beta}_{\log(\text{price})}}$$
+
+```{r bin_fit}
+# Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
+# logit[P(Y≤j∣x)] = log( P(Y>j∣x) / P(Y≤j∣x) )
+
+# Ajuste com a parametrização de sinal do Agresti3
+modelo_vgam <- vglm(
+    happy ~ trauma + race,
+    family = cumulative(parallel = TRUE),
+    data = wine
+)
+
+summary(modelo_vgam)
+```
+
+### 3.2.3 Diagnósticos de Resíduos e Desempenho Preditivo Binário
+
+A validação de um modelo logístico binário não se limita à análise de resíduos de Pearson e Deviance; ela requer a avaliação rigorosa da sua **capacidade discriminatória**: 1. **Curva ROC (*Receiver Operating Characteristic*)**: Mapeia a taxa de verdadeiros positivos (Sensibilidade) contra a taxa de falsos positivos ($1 - \text{Especificidade}$) para todos os pontos de corte de probabilidade possíveis $c \in [0, 1]$. 2. **Área sob a Curva ROC (AUC)**: Mensura a probabilidade de o modelo atribuir uma probabilidade predita mais elevada a um vinho de excelência ($\ge 90$ pontos) selecionado aleatoriamente do que a um vinho comum ($< 90$ pontos). Valores de $\text{AUC} \ge 0,70$ indicam discriminação aceitável, e $\text{AUC} \ge 0,80$ denotam excelente poder de discriminação. 3. **Ponto de Corte Ótimo de Youden**: Determina o limiar ótimo $c^*$ que maximiza o índice $J = \text{Sensibilidade} + \text{Especificidade} - 1$, equilibrando a detecção de vinhos premium e a contenção de falsos alarmes.
+
+```{r bin_res_analysis}
+
+```
+
+## 3.3 O Modelo de Chances Proporcionais Parciais (PPOM - Partial Proportional Odds Model)
+
+### 3.3.1 Fundamentação Metodológica: O Equilíbrio entre Rigidez e Hiperparametrização
+
+Quando o Teste de Brant ou o Teste da Razão de Verossimilhança rejeita a hipótese nula de chances proporcionais, a literatura estatística (Slide 2, p. 97-98; Peterson & Harrell, 1990; Agresti, 2013) oferece alternativas metodológicas com diferentes trade-offs: 1. **Modelo Cumulative Totalmente Irrestrito (`parallel = FALSE`)**: - Estima um vetor independente de coeficientes ${\beta}_j$ para cada um dos $J-1$ cortes, consumindo $(J-1) \times p$ parâmetros de inclinação. - **O Fenômeno do Cruzamento de Curvas (*Crossing Probabilities*)**: Em modelos com inclinações diferentes para cada logito acumulado, as retas no espaço linear fatalmente se interceptam para determinados valores das covariáveis. Nesses pontos de cruzamento, a probabilidade acumulada estimada torna-se não-monótona ($\hat{\gamma}_j < \hat{\gamma}_{j-1}$), gerando **probabilidades de categoria negativas (**$\hat{\pi}_j < 0$), uma violação teórica inaceitável. 2. **A Solução Canônica: O Modelo de Chances Proporcionais Parciais (PPOM)**: - Proposto por Peterson & Harrell (1990), o PPOM atua como um modelo de compromisso parcimonioso: relaxa a suposição de paralelismo **exclusivamente para as covariáveis que comprovadamente a violam** (notadamente $\log(\text{price})$), mantendo os coeficientes de outras variáveis (como `terroir`) homogêneos em todos os cortes: $$\text{logit}[P(Y \le j \mid \mathbf{x})] = \alpha_j - \mathbf{x}_{\text{terroir}}^T {\beta}_{\text{terroir}} - \beta_{\log(\text{price}), j} \log(\text{price}), \quad j = 1, \dots, J-1$$ - Essa formulação reduz expressivamente o número de parâmetros adicionais, elimina a rigidez do paralelismo estrito e captura com fidelidade a dinâmica empírica do mercado de vinhos, onde o efeito do preço é assimétrico e mais acentuado na transição para o estrato de pontuação mais alto.
+
+```{r modelo_misterioso_selection}
+```
+
+### 3.3.2 Ajuste do Modelo PPOM
+
+```{r modelo_misterioso_fit}
+# Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
+# logit[P(Y≤j∣x)] = log( P(Y>j∣x) / P(Y≤j∣x) )
+
+# Ajuste com a parametrização de sinal do Agresti3
+# No chunk modelo_misterioso_fit:
+fit_ppom <- vglm(
+    points_ord ~ XXXXXXXXX,
+    family = cumulative(parallel = FALSE ~ log_price),
+    data = df
+)
+
+summary(modelo_vgam)
+```
+
+### 3.3.3 Análise de Qualidade de Ajuste e Comparação de Deviance do PPOM
+
+A avaliação do PPOM confronta o ganho de log-verossimilhança contra o custo em graus de liberdade em relação ao POM estrito: $$\Delta G^2 = G^2_{\text{POM}} - G^2_{\text{PPOM}} \sim \chi^2_{\Delta gl}$$ onde $\Delta gl = (J-2) \times p_{\text{não-paralelo}}$. Um decréscimo estatisticamente significativo de deviance acompanhado de menor AIC confirma a superioridade empírica do modelo parcial.
+
+```{r modelo_misterioso_res_analysis}
+
+```
+
+## 3.4 Síntese Comparativa dos Três Modelos de Regressão
+
+A síntese dos três modelos (Ordinal Estrito via `polr`, Ordinal Parcial via `vglm` e Binário Dicotômico via `glm`) permite avaliar: 1. **Estabilidade Paramétrica da Variável Latente**: Como todos os modelos derivam da mesma qualidade latente contínua $Y^*$, a concordância dos coeficientes de $\log(\text{price})$ em torno de $\hat{\beta} \approx 2,14 - 2,18$ evidencia a robustez do sinal do efeito econômico. 2. **Trade-offs Metodológicos**: O modelo ordinal estrito é o mais parcimonioso; o modelo parcial (PPOM) acomoda a dinâmica heterogênea do preço sem inflar parâmetros; e o modelo binário simplifica a comunicação à custa da perda de variabilidade interna das caudas.
+
+```{r compare_fits}
+```
+
+# Capítulo 4: Resultados, Razão de Chances vs. Risco Relativo e Abordagem Bayesiana
+
+```{r results}
+```
+
+## 4.1 A Distinção Crítica entre Razão de Chances (OR) e Risco Relativo (RR)
+
+Uma das confusões conceituais mais frequentes na literatura empírica e na divulgação científica reside na interpretação direta da **Razão de Chances (*Odds Ratio* - OR)** como se fosse o **Risco Relativo (*Relative Risk* - RR)**. Conforme exigido nas diretrizes do trabalho e nos slides da disciplina (Slide 1, p. 19-26, 65-72), formalizamos a relação matemática entre ambos e as falácias decorrentes de sua indistinção.
+
+### Dedução Matemática Formal
+
+Sejam $\pi_1 = P(Y = 1 \mid X = 1)$ e $\pi_0 = P(Y = 1 \mid X = 0)$ as probabilidades de ocorrência do evento de interesse nos grupos exposto e de referência, respectivamente.
+
+O Risco Relativo (razão de probabilidades) é definido por: $$\text{RR} = \frac{\pi_1}{\pi_0}$$
+
+A Razão de Chances é a razão entre as chances (*odds*) de ocorrência: $$\text{OR} = \frac{\text{odds}_1}{\text{odds}_0} = \frac{\pi_1 / (1 - \pi_1)}{\pi_0 / (1 - \pi_0)} = \left(\frac{\pi_1}{\pi_0}\right) \times \left(\frac{1 - \pi_0}{1 - \pi_1}\right) = \text{RR} \times \left(\frac{1 - \pi_0}{1 - \pi_1}\right)$$
+
+### A Suposição de Evento Raro e a Realidade dos Dados
+
+A aproximação $\text{OR} \approx \text{RR}$ é válida **estrita e unicamente** quando o evento é raro na população ($\pi_0 \to 0$ e $\pi_1 \to 0$). Nessas condições, $1 - \pi_0 \approx 1$ e $1 - \pi_1 \approx 1$, de modo que o fator de disparidade $\left(\frac{1 - \pi_0}{1 - \pi_1}\right) \approx 1$.
+
+No entanto, em nosso banco de dados de vinhos: \* A prevalência empírica de vinhos no estrato de excelência ($\ge 90$ pontos) é de $37,52\%$ (ou seja, $\pi \approx 0,38$). \* O evento **definitivamente não é raro**! \* Quando o evento é frequente e a associação é positiva ($\pi_1 > \pi_0$), temos necessariamente $(1 - \pi_0) > (1 - \pi_1)$, o que implica: $$\frac{1 - \pi_0}{1 - \pi_1} > 1 \implies \text{OR} > \text{RR}$$ \* Consequentemente, a Razão de Chances **inflaciona severamente** a percepção do efeito se interpretada incorretamente como probabilidade multiplicativa.
+
+### Tabela de Frases Equivocadas na Literatura e Correções Conceituais
+
+| Frase Equivocada (Erro Frequente) | Por que está Errada? (Diagnóstico Estatístico) | Correção Conceitual Rigorosa |
+|------------------------|------------------------|------------------------|
+| *"Como a Razão de Chances do preço é 8,8, uma garrafa com o dobro do preço tem 8,8 vezes mais probabilidade de ser premiada com 90+ pontos."* | Confunde *chance* ($\pi/(1-\pi)$) com *probabilidade* ($\pi$). A probabilidade é limitada no intervalo $[0, 1]$ e não cresce linearmente com a chance. | *"A chance relativa (*$\text{odds}$) de receber 90+ pontos é multiplicada por 8,8; contudo, o aumento percentual na probabilidade real (Risco Relativo) é substancialmente menor (ex: cresce de 30% para 65%, o que equivale a um RR de 2,17, e não 8,8)." |
+| *"Em qualquer modelo de regressão logística, podemos interpretar o exponencial do coeficiente* $\exp(\beta)$ como a taxa de risco relativo." | Ignora a premissa de evento raro. A identidade $\text{OR} \approx \text{RR}$ só se sustenta quando a taxa de incidência do evento na população de base for inferior a 5% a 10%. | *"O coeficiente* $\exp(\beta)$ representa estritamente a Razão de Chances. Para obter o Risco Relativo em eventos frequentes, é necessário calcular as probabilidades marginais preditas ou aplicar modelos log-binomiais / Poisson robusto." |
+| *"Um vinho do Velho Mundo tem 39% mais chance de nota superior, logo 39% a mais de garrafas francesas serão excelentes em comparação com americanas."* | Confunde a razão relativa de chances ($\text{OR} = 1,39$) com a diferença absoluta de risco ($\pi_1 - \pi_0$) ou com a proporção marginal observada. | *"Mantendo o preço constante, a chance de um vinho do Velho Mundo atingir estratos superiores é 39% maior do que a de um vinho de referência; isso não se traduz em um acréscimo de 39 pontos percentuais na prevalência de excelência."* |
+
+## 4.2 Ganhos Conceituais e Estatísticos da Abordagem Bayesiana
+
+Conforme solicitado nas diretrizes da disciplina, destacamos os ganhos metodológicos fundamentais que a transição da inferência frequentista clássica para o paradigma Bayesiano (via Stan/`brms`) traria para a modelagem da qualidade de vinhos:
+
+1.  **Tratamento Natural da Quase-Separação Completa (*Complete Separation*)**:
+    - No ajuste frequentista por Máxima Verossimilhança, quando uma categoria de país ou casta rara possui contagens nulas em determinado estrato de qualidade, os estimadores de Fisher divergem para $\pm \infty$ com erros-padrão astronômicos (falha de convergência).
+    - Sob a ótica Bayesiana, a incorporação de **distribuições a priori regularizadoras** (como priors $\text{Normal}(0, \sigma^2)$ ou $\text{Student-}t$) contrai as estimativas em direção ao centro (*shrinkage*), impedindo estimativas degeneradas e garantindo estabilidade numérica sem necessidade de agrupar arbitrariamente categorias raras.
+2.  **Modelagem Hierárquica Multinível Espacial e de Denominação**:
+    - A base de dados possui uma estrutura hierárquica naturalmente aninhada: *Vinho* $\in$ Vinícola/Produtor $\in$ Denominação de Origem $\in$ País.
+    - A regressão frequentista padrão ignora a dependência residual intra-produtor ou intra-denominação (violando a independência das observações). Modelos ordinais bayesianos multinível incorporam efeitos aleatórios nos limiares ou coeficientes, compartilhando informação entre regiões com muitos dados e regiões pouco amostradas através do empréstimo de força estatística (*borrowing strength*).
+3.  **Inferência Exata e Propagação Completa da Incerteza**:
+    - Na abordagem clássica, intervalos de confiança para probabilidades preditas ou razões de risco exigem o uso do Método Delta e aproximações normais assintóticas de Wald, que falham nas caudas da distribuição.
+    - Na inferência Bayesiana baseada em cadeias de Markov Monte Carlo (MCMC), obtém-se diretamente a **distribuição a posteriori conjunta completa** dos parâmetros. Qualquer quantidade derivada não-linear — como probabilidades de corte, contrastes espaciais ou índices de preferência — possui intervalo de credibilidade de mais alta densidade a posteriori (HPD) exato e interpretável probabilisticamente sem apelo a teoremas assintóticos.

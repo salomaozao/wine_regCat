@@ -99,3 +99,31 @@ Este arquivo registra cronologicamente todas as sessões de trabalho, contexto, 
 
 **Próxima IA / Handoff:**
 - Prestar suporte analitico caso o aluno tenha duvidas durante a escrita dos chunks ou quando iniciar a estruturacao dos 15 slides limpos da apresentacao.
+
+---
+
+## 2026-09-27 13:20 — docs(wine.qmd): inclusao dos textos teoricos e fundamentacao estatistica completa sem alteracao dos blocos de codigo
+
+**Autor:** Antigravity / Gemini 3.8 Flash (High) · operador: Gabriel Nascimento
+
+**Contexto:** O usuario solicitou a insercao dos textos formais e da fundamentacao estatistica rigorosa diretamente no documento wine.qmd, explicando a razao de cada modelo e tecnica adotada (modelo ordinal de logitos acumulados, derivacao por variavel latente, suposicao de chances proporcionais, testes de Brant e LRT, efeito do N grande, modelo de chances proporcionais parciais - PPOM, custos de eficiencia da dicotomizacao binaria, residuos substitutos do pacote sure, deducao formal de OR vs RR com tabela de falacias conceituais e justificativa da abordagem bayesiana), com a instrucao expressa de nao alterar nenhum bloco de codigo existente.
+
+**Feito:**
+- Insercao e expansao dos textos conceituais e teorico-metodologicos em todos os capitulos do arquivo TP1/R/wine.qmd:
+  - Capitulo 1 (EDA): Contextualizacao hedônica de vinhos, natureza ordinal sensorial das avaliacoes, assimetria severa do preco e justificativa matematica/economica de log(price) por retornos marginais decrescentes; dimensao espacial e heterogeneidade de terroir (Velho Mundo vs. Novo Mundo).
+  - Capitulo 2 (Pressupostos): Formulacao matematica dos logitos acumulados, derivacao formal via variavel latente continua Y*, geometria do paralelismo, convencao de sinal de Agresti (OR_{>j} = exp(beta)), procedimentos de diagnostico (Brant e LRT) e discussao aprofundada sobre a inflacao de poder em amostras massivas (N ≈ 120.000).
+  - Capitulo 3 (Modelagem):
+    - 3.1 Ordinal: Criterios formais de selecao aninhada (TRV, AIC, BIC), interpretacao probabilistica dos limiares e coeficientes, e fundamentacao teorica dos Residuos Substitutos (Surrogate Residuals de Liu & Zhang, 2017 via sure) superando as bandas discretas dos residuos convencionais.
+    - 3.2 Binario Dicotomizado: Definicao da barreira comercial dos 90 pontos (Y_bin), trade-off teorico entre simplificacao e perda de eficiencia estatistica (descarte de variabilidade interna e inflacao de variancia amostral), concordancia latente e avaliacao preditiva por curva ROC e AUC.
+    - 3.3 PPOM: Fundamentacao do Modelo de Chances Proporcionais Parciais como solucao canonica contra o risco de probabilidades negativas e hiperparametrizacao do modelo irrestrito, relaxando o paralelismo exclusivamente para log(price).
+    - 3.4 Sintese Comparativa: Confronto metodologico dos tres modelos e avaliacao da estabilidade parametrica latente.
+  - Capitulo 4 (Conclusoes e Extensoes):
+    - Deducao algebrica detalhada da relacao OR = RR * (1-pi0)/(1-pi1), comprovacao de que o evento nao e raro (≈ 37,5% de vinhos >= 90 pts) e que o OR inflaciona severamente a percepcao de efeito em relacao ao RR, acompanhado de tabela de frases equivocadas frequentes na literatura e correcoes conceituais.
+    - Fundamentacao formal dos tres ganhos da abordagem Bayesiana (priors regularizadoras contra quase-separacao completa, modelagem hierarquica multinivel natural por vinicola/terroir/pais, e inferencia exata de credibilidade HPD via MCMC sem aproximacoes de Wald).
+- Auditoria de integridade: 100% dos 17 blocos de codigo (`{r ...} ... `) foram rigorosamente preservados intactos.
+
+**Decisões:**
+- Preservar rigorosamente a integridade dos blocos de codigo e focar exclusivamente no aprofundamento textual de nivel de pos-graduacao em estatistica.
+
+**Próxima IA / Handoff:**
+- O arquivo TP1/R/wine.qmd esta completamente embasado teoricamente. O grupo pode agora focar na execucao dos chunks e no desenho dos 15 slides limpos da apresentacao de 20 minutos.
