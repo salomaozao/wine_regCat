@@ -178,3 +178,37 @@ oot.dir no knitr para garantir reproducibilidade de caminhos relativos no RStudi
 
 **Próxima IA / Handoff:**
 - Integrar o Capítulo 4 no wine.qmd e estruturar os 15 slides limpos da apresentação do grupo (entrega 30/09).
+
+---
+
+## 2026-09-28 16:55 — feat(wine_IA): relatorio institucional completo com modelagem, pressupostos e diagnosticos
+
+**Autor:** Antigravity / Gemini 3.8 Flash (High) · operador: Gabriel Nascimento
+
+**Contexto:** O usuário solicitou a criação e execução de todo o relatório do Trabalho Prático 1 no arquivo R/wine_IA.qmd, com apresentação institucional formal e estrita aderência ao conteúdo dos slides da disciplina (Slides 1 a 3 do Prof. Cristiano Santos).
+
+**Feito:**
+- Criação e renderização completa de R/wine_IA.qmd e do documento HTML standalone institucional R/wine_IA.html (5,6 MB).
+- Implementação rigorosa de todos os tópicos do curso e do enunciado do TP1:
+  - EDA completa: univariada, bivariada de violino/boxplot e cartografia vetorial global com projeção Robinson.
+  - Formulação matemática completa: logitos acumulados sob parametrização de Agresti e derivação pela variável contínua latente Y*.
+  - Seleção hierárquica aninhada de variáveis (m0 a m3 via MASS::polr), com tabela comparativa de deviance, AIC, BIC e TRV (anova) e discussão do impacto do N massivo (N = 120.916).
+  - Estimativas do modelo escolhido (m2: log_price + terroir), tabela de ORs e gráfico de curvas de probabilidades preditas P(Y=j) por estrato e preço.
+  - Diagnóstico de chances proporcionais: Teste formal de Brant (omnibus e individual) e tabela de colapsamentos binários sucessivos (revelando estabilidade do preço e decaimento do prêmio do Velho Mundo).
+  - Modelo de Chances Proporcionais Parciais (PPOM): justificativa metodológica de relaxar o paralelismo no terroir (vglm com reverse = TRUE) e evitar retas que se cruzam e probabilidades negativas geradas ao relaxar o log_price.
+  - Análise de Resíduos Substitutos (Surrogate Residuals via pacote sure de Liu & Zhang, 2017): simulações de Monte Carlo em subamostra estratificada (n = 5.000, nsim = 30) gerando o painel 2x2 (QQ-plot, fitted, log_price e terroir).
+  - Dicotomização na barreira comercial dos 90 pontos (Y > 3, classes 4 e 5, prevalência 37,5%): ajuste canônico por glm(family = binomial), comprovação da invariância do parâmetro latente e demonstração matemática do custo da dicotomização (inflação de 33% no erro-padrão).
+  - Avaliação preditiva: Curva ROC, índice AUC (0,813) e ponto de corte ótimo de Youden (c* = 0,345, sensibilidade 75,3%, especificidade 72,5%).
+  - Dedução formal de OR vs. RR comprovando matematicamente por que OR > RR quando o evento não é raro, cálculo numérico para garrafas de US$ 20 vs. US$ 40 (OR = 4,5 vs. RR = 2,7) e tabela de frases equivocadas frequentes na literatura vs. correções conceituais.
+  - Fundamentação dos 3 ganhos da abordagem Bayesiana (regularização contra quase-separação, modelo hierárquico multinível por provador/denominação e inferência exata de intervalos HPD via MCMC).
+  - Proposta detalhada da apresentação oral de 15 slides limpos para 20 minutos (estritamente com tabelas, fórmulas e gráficos, sem texto interpretativo, conforme a regra de ouro do enunciado).
+
+**Decisões:**
+- Estruturar o relatório com visual institucional Quarto (tema cosmo, tipografia executiva, MathJax, abas de código retráteis e sumário flutuante).
+- Renderizar em formato standalone (self-contained: true) com todas as figuras e bibliotecas embutidas no próprio arquivo HTML.
+
+**Pendente / atenção:**
+- Apenas preparar os slides da apresentação com base no roteiro da Seção 10.
+
+**Próxima IA / Handoff:**
+- O relatório técnico está 100% concluído e compilado. A próxima etapa é transpor os gráficos e tabelas gerados para o arquivo de apresentação (ex: Quarto revealjs ou Beamer/PowerPoint) com os 15 slides sem texto interpretativo.
