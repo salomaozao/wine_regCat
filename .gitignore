@@ -14,3 +14,10 @@ data/*.kml
 data/winemagv2.csv
 data/world-administrative-boundaries.csv
 data/world-administrative-boundaries(1)/
+
+# Temporários do RStudio e plots
+.here
+Rplots.pdf
+.vdoc*
+*.vdoc*
+R/.vdoc*

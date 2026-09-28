@@ -127,3 +127,20 @@ Este arquivo registra cronologicamente todas as sessões de trabalho, contexto, 
 
 **Próxima IA / Handoff:**
 - O arquivo TP1/R/wine.qmd esta completamente embasado teoricamente. O grupo pode agora focar na execucao dos chunks e no desenho dos 15 slides limpos da apresentacao de 20 minutos.
+
+---
+
+## 2026-09-27 21:48 — feat(eda): inclusao de analise univariada descritiva e ajuste de caminhos no wine.qmd
+
+**Autor:** Antigravity / Gemini 3.8 Flash (High) · operador: Gabriel Nascimento
+
+**Contexto:** O usuario solicitou novo commit ('novamente') apos adicionar analises univariadas completas da resposta e covariáveis no arquivo wine.qmd.
+
+**Feito:**
+- Inclusao do chunk EDA-univariadas em R/wine.qmd com distribuicao de pontos contínuos (p_pts), classes ordinais categorizadas (p_classes), preco em escala logarítmica com contagem de missings (p_price) e funcao modular plot_top() para exploracao das covariáveis categoricas mais frequentes (country, ariety e 	aster_name).
+- Configuracao explicita de 
+oot.dir no knitr para garantir reproducibilidade de caminhos relativos no RStudio.
+- Atualizacao do .gitignore para ignorar .vdoc*, .here e Rplots.pdf.
+
+**Decisões:**
+- Manter o historico limpo e com governanca atualizada via .brain/.

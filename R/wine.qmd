@@ -13,6 +13,10 @@ output:
 ```{r setup, include=FALSE, message=FALSE, warning=FALSE}
 rm(list = ls())
 
+# Raiz do projeto: setwd vale no console; root.dir faz o knitr usar a mesma pasta em todos os chunks
+setwd("G:/Meu Drive/ufmg/2026_2/RegCatOrd/TP1")
+knitr::opts_knit$set(root.dir = "G:/Meu Drive/ufmg/2026_2/RegCatOrd/TP1")
+
 knitr::opts_chunk$set(
     echo = TRUE,
     message = FALSE,
@@ -27,7 +31,6 @@ set.seed(262)
 
 
 pacman::p_load(
-    here, # caminhos relativos a raiz do projeto
     rio, # leitura do csv
     MASS, # polr: modelo de chances proporcionais
     VGAM, # vglm: chances proporcionais parciais / razao continua
@@ -42,13 +45,12 @@ pacman::p_load(
 )
 ```
 
-
 ```{r get-data}
 # Número de categorias da resposta ordinal: único parâmetro a definir.
 # Os pontos de corte saem dos quantis empíricos de `points`, não de valores fixos.
 K_CAT <- 5
 
-raw <- import(here("data", "winemagv2.csv")) |>
+raw <- import("data/winemagv2.csv") |>
     select(-c(1, description, designation, region_1, region_2))
 
 
@@ -61,6 +63,7 @@ print(cortes)
 df <- raw |>
     # pts
     mutate(
+        log_pts = log(points),
         points = cut(
             points,
             breaks = unique(cortes),
@@ -68,11 +71,9 @@ df <- raw |>
             labels = seq_len(length(unique(cortes)) - 1),
             ordered_result = TRUE
         ),
-        log_pts = log(points),
 
         #  Top 6 países produtores (EUA, França, Itália, Espanha, Portugal, Chile) + "Outros".
         # Agrupar nas castas mais representativas (Cabernet Sauvignon, Pinot Noir, Chardonnay, Syrah, Bordeaux Blend) e "Demais Variedades"
-
 
         # todas as covariáveis de texto viram fator (nominal)
         across(where(is.character), as.factor)
@@ -81,10 +82,149 @@ df <- raw |>
 glimpse(df)
 ```
 
-
 # Capítulo 1: Introdução
+
 ## EDA
-Inicialmente apresente uma rápida análise descritiva dos dados utilizados. 
+
+Inicialmente apresente uma rápida análise descritiva dos dados utilizados.
+
+### Descrição das variáveis
+
+```{r EDA-univariadas, fig.width=9, fig.height=4.5}
+paleta_vinho <- c("#D9A5B3", "#B86B77", "#9E3D52", "#7A182F", "#4A0E17")
+cor_vinho <- "#7A182F"
+fmt_num <- label_number(big.mark = ".", decimal.mark = ",")
+fmt_pct <- label_percent(accuracy = 0.1, decimal.mark = ",")
+
+tema_eda <- theme_minimal(base_size = 12) +
+    theme(
+        legend.position = "none",
+        plot.title = element_text(face = "bold", color = "#2C1820"),
+        plot.subtitle = element_text(color = "gray30", margin = margin(b = 8)),
+        panel.grid.minor = element_blank()
+    )
+
+# Resposta original: pontuação de 80 a 100, com as linhas nos pontos de corte das classes
+# (intervalos fechados à direita, então a fronteira entre b e b + 1 fica em b + 0.5)
+p_pts <- ggplot(raw, aes(x = points)) +
+    geom_bar(fill = cor_vinho, width = 0.8) +
+    geom_vline(
+        xintercept = head(tail(unique(cortes), -1), -1) + 0.5,
+        linetype = "dashed",
+        color = "gray40"
+    ) +
+    scale_x_continuous(breaks = seq(80, 100, 2)) +
+    scale_y_continuous(
+        labels = fmt_num,
+        expand = expansion(mult = c(0, 0.05))
+    ) +
+    labs(
+        title = "Pontuação dos vinhos",
+        subtitle = "Linhas tracejadas: pontos de corte (quantis) das classes ordinais",
+        x = "Pontos",
+        y = "Nº de avaliações"
+    ) +
+    tema_eda +
+    theme(panel.grid.major.x = element_blank())
+
+# Resposta categorizada: K_CAT classes ordinais
+p_classes <- df |>
+    count(points) |>
+    ggplot(aes(x = points, y = n, fill = points)) +
+    geom_col(width = 0.7) +
+    geom_text(aes(label = fmt_pct(n / sum(n))), vjust = -0.5, size = 3.6) +
+    scale_fill_manual(
+        values = colorRampPalette(paleta_vinho)(nlevels(df$points))
+    ) +
+    scale_y_continuous(labels = fmt_num, expand = expansion(mult = c(0, 0.1))) +
+    labs(
+        title = "Classes ordinais de qualidade",
+        subtitle = "Frequência de cada classe da variável resposta",
+        x = "Classe (1 = menor pontuação)",
+        y = "Nº de avaliações"
+    ) +
+    tema_eda +
+    theme(panel.grid.major.x = element_blank())
+
+# Preço: fortemente assimétrico, por isso escala log
+p_price <- df |>
+    filter(!is.na(price)) |>
+    ggplot(aes(x = price)) +
+    geom_histogram(
+        bins = 50,
+        fill = cor_vinho,
+        color = "white",
+        linewidth = 0.2
+    ) +
+    scale_x_log10(
+        breaks = c(4, 10, 25, 50, 100, 250, 500, 1000, 3300),
+        labels = label_dollar(accuracy = 1)
+    ) +
+    scale_y_continuous(
+        labels = fmt_num,
+        expand = expansion(mult = c(0, 0.05))
+    ) +
+    labs(
+        title = "Preço da garrafa",
+        subtitle = paste0(
+            "Escala logarítmica | ",
+            fmt_num(sum(is.na(df$price))),
+            " avaliações sem preço (",
+            fmt_pct(mean(is.na(df$price))),
+            ")"
+        ),
+        x = "Preço (US$, escala log)",
+        y = "Nº de avaliações"
+    ) +
+    tema_eda +
+    theme(panel.grid.major.x = element_blank())
+
+# Covariáveis nominais: n_top níveis mais frequentes + "Outros" (em cinza, sempre no fim)
+plot_top <- function(dados, var, titulo, n_top = 10) {
+    dados |>
+        mutate(nivel = as.character({{ var }})) |>
+        filter(!is.na(nivel), nivel != "") |>
+        mutate(nivel = fct_lump_n(nivel, n = n_top, other_level = "Outros")) |>
+        count(nivel) |>
+        mutate(
+            outros = nivel == "Outros",
+            nivel = fct_reorder(nivel, if_else(outros, -Inf, n))
+        ) |>
+        ggplot(aes(x = n, y = nivel, fill = outros)) +
+        geom_col(width = 0.7) +
+        geom_text(aes(label = fmt_pct(n / sum(n))), hjust = -0.15, size = 3.4) +
+        scale_fill_manual(values = c(`FALSE` = cor_vinho, `TRUE` = "gray70")) +
+        scale_x_continuous(
+            labels = fmt_num,
+            expand = expansion(mult = c(0, 0.12))
+        ) +
+        labs(
+            title = titulo,
+            subtitle = paste0(
+                n_top,
+                " níveis mais frequentes; os demais agrupados em \"Outros\""
+            ),
+            x = "Nº de avaliações",
+            y = NULL
+        ) +
+        tema_eda +
+        theme(panel.grid.major.y = element_blank())
+}
+
+p_pais <- plot_top(df, country, "País produtor")
+p_variedade <- plot_top(df, variety, "Variedade (casta)")
+p_avaliador <- plot_top(df, taster_name, "Avaliador")
+
+p_pts
+p_classes
+p_price
+p_pais
+p_variedade
+p_avaliador
+```
+
+### Relações entre variáveis
+
 ```{r EDA-covar-price, fig.width=9, fig.height=5, fig.align='center', dpi=300}
 #| label: fig-price-ordinal
 #| fig-cap: "Distribuição do Preço por Categoria Ordinal de Qualidade"
@@ -196,7 +336,7 @@ p_covar
 
 # 1. Carregar o Shapefile dos países
 # 1. Carregar Shapefile das fronteiras mundiais
-mapa_mundo <- st_read(here("data", "world-administrative-boundaries"), quiet = TRUE) |>
+mapa_mundo <- st_read("data/world-administrative-boundaries", quiet = TRUE) |>
     select(name = English_Nam, geometry)
 
 # 2. Resumir a qualidade dos vinhos por país produtor
@@ -293,16 +433,15 @@ p_mapa
 ```
 
 ## Resultados esperados
-* **$H_1$ (Elasticidade Positiva do Preço)**: $\beta_{\log(\text{price})} > 0$. Vinhos mais caros têm chances substantivamente maiores de atingir os estratos mais altos de pontuação. Espera-se uma Razão de Chances acumulada expressiva por dobra de preço ($OR > 2.0$).
-* **$H_2$ (Prêmio de Qualidade do Velho Mundo)**: Condicional a um mesmo patamar de preço, vinhos do Velho Mundo (especialmente França e Itália) tendem a apresentar chances superiores de alcançar faixas de pontuação elevadas devido ao prestígio de suas denominações de origem controlada (AOC, DOCG).
-* **$H_3$ (Rejeição da Suposição de Chances Proporcionais)**: Em decorrência do tamanho amostral elevado ($N > 100.000$) e da dinâmica não linear da relação preço-qualidade, o Teste de Brant e o Teste de Razão de Verossimilhança rejeitarão a hipótese nula de paralelismo estrito ($p < 0,05$). O efeito do preço tende a ser mais acentuado na transição para a categoria superlativa ($\ge 92$ ou $\ge 95$ pts) do que nas transições inferiores.
-* **$H_4$ (Adequação do Modelo de Chances Proporcionais Parciais - PPOM)**: Relaxar o paralelismo apenas para $\log(\text{price})$ ou variáveis violadoras via `VGAM::vglm(..., family = cumulative(parallel = FALSE ~ ...))` proporcionará ganho de ajuste (menor AIC/Deviance) mantendo a interpretabilidade dos efeitos fixos das demais covariáveis.
-* **$H_5$ (Trade-off do Colapsamento Binário)**: A dicotomização em $\ge 90$ pontos preservará a direção dos efeitos, mas sacrificará a capacidade do modelo de discriminar a variabilidade interna das caudas (não distingue 80 de 89, nem 90 de 100), reduzindo a eficiência estatística dos estimadores.
 
-
-
+- $H_1$ (Elasticidade Positiva do Preço): $\beta_{\log(\text{price})} > 0$. Vinhos mais caros têm chances substantivamente maiores de atingir os estratos mais altos de pontuação. Espera-se uma Razão de Chances acumulada expressiva por dobra de preço ($OR > 2.0$).
+- $H_2$ (Prêmio de Qualidade do Velho Mundo): Condicional a um mesmo patamar de preço, vinhos do Velho Mundo (especialmente França e Itália) tendem a apresentar chances superiores de alcançar faixas de pontuação elevadas devido ao prestígio de suas denominações de origem controlada (AOC, DOCG).
+- $H_3$ (Rejeição da Suposição de Chances Proporcionais): Em decorrência do tamanho amostral elevado ($N > 100.000$) e da dinâmica não linear da relação preço-qualidade, o Teste de Brant e o Teste de Razão de Verossimilhança rejeitarão a hipótese nula de paralelismo estrito ($p < 0,05$). O efeito do preço tende a ser mais acentuado na transição para a categoria superlativa ($\ge 92$ ou $\ge 95$ pts) do que nas transições inferiores.
+- $H_4$ (Adequação do Modelo de Chances Proporcionais Parciais - PPOM): Relaxar o paralelismo apenas para $\log(\text{price})$ ou variáveis violadoras via `VGAM::vglm(..., family = cumulative(parallel = FALSE ~ ...))` proporcionará ganho de ajuste (menor AIC/Deviance) mantendo a interpretabilidade dos efeitos fixos das demais covariáveis.
+- $H_5$ (Trade-off do Colapsamento Binário): A dicotomização em $\ge 90$ pontos preservará a direção dos efeitos, mas sacrificará a capacidade do modelo de discriminar a variabilidade interna das caudas (não distingue 80 de 89, nem 90 de 100), reduzindo a eficiência estatística dos estimadores.
 
 # Capítulo 2: Pressupostos
+
 Verifique a suposição de chances proporcionais e proponha um modelo mais adequado caso ela não seja válida.
 
 ```{r validate-assumptions}
@@ -323,19 +462,24 @@ Verifique a suposição de chances proporcionais e proponha um modelo mais adequ
 ## 3.1 Regressão para dados ordinais
 
 ### 3.1.1 Seleção de variáveis
+
 ### 3.1.2 Ajuste
-Faca o ajuste de modelos de regressão para dados ordinais, efetuando seleção de variáveis e interpretando os resultados obtidos.
-### 3.1.1 Análise de resíduos
+
+Faca o ajuste de modelos de regressão para dados ordinais, efetuando seleção de variáveis e interpretando os resultados obtidos. \### 3.1.1 Análise de resíduos
+
 ```{r ordinal_selection}
 ```
 
 ### 3.1.2 Ajuste do modelo
 
 - Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
-- logit[P(Y≤j∣x)] = log( P(Y>j∣x) / P(Y≤j∣x) )
-- Vamos usar variável latente 
 
-- Suposição de chances proporcionais [colocar conta de razção de odds] - Modelo está errado
+- logit\[P(Y≤j∣x)\] = log( P(Y\>j∣x) / P(Y≤j∣x) )
+
+- Vamos usar variável latente
+
+- Suposição de chances proporcionais \[colocar conta de razção de odds\] - Modelo está errado
+
 ```{r ordinal_fit}
 
 # Ajuste com a parametrização de sinal do Agresti3
@@ -348,40 +492,31 @@ modelo_vgam <- vglm(
 summary(modelo_vgam)
 ```
 
-**Diagnóstico da Suposição e Alternativas** (Slide 2, p. 89-98):
-  1. *Teste de Brant* (`brant::brant(fit_polr)`): Testa individualmente cada covariável e omnibus via estatística assintótica $\chi^2$.
-  2. *Teste de Razão de Verossimilhança no VGAM*: Comparar modelo com `parallel = TRUE` vs. `parallel = FALSE` via `lrtest`.
-  3. *O Efeito do Tamanho Amostral $N$* (Slide 2, p. 93-94): Em grandes amostras, testes formais têm poder inflacionado e rejeitam $H_0$ mesmo para diferenças irrelevantes do ponto de vista substantivo. Não se deve descartar o modelo ordinal sumariamente.
-  4. *Modelo de Chances Proporcionais Parciais (PPOM)* (Slide 2, p. 98): Permitir efeitos não-paralelos apenas para a covariável que viola substancialmente a suposição (`parallel = FALSE ~ log_price`).
-  5. *Comparação com Colapsamento* (Slide 2, p. 95-96): Avaliar estabilidade dos $\beta$ entre cortes binários sucessivos.
-
+**Diagnóstico da Suposição e Alternativas** (Slide 2, p. 89-98): 1. *Teste de Brant* (`brant::brant(fit_polr)`): Testa individualmente cada covariável e omnibus via estatística assintótica $\chi^2$. 2. *Teste de Razão de Verossimilhança no VGAM*: Comparar modelo com `parallel = TRUE` vs. `parallel = FALSE` via `lrtest`. 3. *O Efeito do Tamanho Amostral* $N$ (Slide 2, p. 93-94): Em grandes amostras, testes formais têm poder inflacionado e rejeitam $H_0$ mesmo para diferenças irrelevantes do ponto de vista substantivo. Não se deve descartar o modelo ordinal sumariamente. 4. *Modelo de Chances Proporcionais Parciais (PPOM)* (Slide 2, p. 98): Permitir efeitos não-paralelos apenas para a covariável que viola substancialmente a suposição (`parallel = FALSE ~ log_price`). 5. *Comparação com Colapsamento* (Slide 2, p. 95-96): Avaliar estabilidade dos $\beta$ entre cortes binários sucessivos.
 
 ### 3.1.3 Análise de resíduos
+
 ```{r ordinal_res_analysis}
 
 ```
 
 ## 3.2 Regressão com dados dicotonomizados
 
-Dicotomize a variável resposta (juntando categorias), ajuste um modelo de regressão para dados binários/binomiais e compare os resultados obtidos.
-logit[P(Y≤j∣x)] = \alpha_j - x^t beta
+Dicotomize a variável resposta (juntando categorias), ajuste um modelo de regressão para dados binários/binomiais e compare os resultados obtidos. logit\[P(Y≤j∣x)\] = \alpha\_j - x\^t beta
 
-Distribuição: Multinomial Ordinal.
-O sinal negativo do polr faz com que beta>0  indique aumento da probabilidade de notas superiores.
-
+Distribuição: Multinomial Ordinal. O sinal negativo do polr faz com que beta\>0 indique aumento da probabilidade de notas superiores.
 
 ### 3.2.1 Seleção de variáveis
 
-
 ```{r}
 # Dicotonomizar a variável -> se tá no quantil 10% ou 5% ela vira "padrão ouro" e aí a gente compara com a comum
-
 ```
 
 ```{r bin_selection}
 ```
 
 ### 3.2.2 Ajuste do modelo
+
 ```{r bin_fit}
 # Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
 # logit[P(Y≤j∣x)] = log( P(Y>j∣x) / P(Y≤j∣x) )
@@ -396,25 +531,23 @@ modelo_vgam <- vglm(
 summary(modelo_vgam)
 ```
 
-
 ### 3.2.3 Análise de resíduos
+
 ```{r bin_res_analysis}
 
 ```
 
-
 ## 3.3 Modelo que roda sem chances porporcionais pq vai bombar cpa
-Verifique a suposicao de chances proporcionais (feito lá atrás) e proponha um modelo mais adequado caso ela não seja válida. 
-### 3.2.1 Seleção de variáveis
-Modelo de Chances Proporcionais Parciais (PPOM - Partial Proportional Odds Model):
+
+Verifique a suposicao de chances proporcionais (feito lá atrás) e proponha um modelo mais adequado caso ela não seja válida. \### 3.2.1 Seleção de variáveis Modelo de Chances Proporcionais Parciais (PPOM - Partial Proportional Odds Model):
 
 Ele não é tão restritivo quanto o POM (parallel = TRUE), nem tão inflacionado em parâmetros quanto o modelo irrestrito (parallel = FALSE). Ele relaxa o paralelismo apenas para a covariável que violou a suposição (log_price).
-
 
 ```{r modelo_misterioso_selection}
 ```
 
 ### 3.3.2 Ajuste do modelo
+
 ```{r modelo_misterioso_fit}
 # Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
 # logit[P(Y≤j∣x)] = log( P(Y>j∣x) / P(Y≤j∣x) )
@@ -430,19 +563,14 @@ fit_ppom <- vglm(
 summary(modelo_vgam)
 ```
 
-
 ### 3.1.2 Análise de resíduos
+
 ```{r modelo_misterioso_res_analysis}
 
 ```
 
-
 ```{r compare_fits}
 ```
-
-
-
-
 
 ```{r results}
 ```
