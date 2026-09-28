@@ -14,8 +14,8 @@ output:
 rm(list = ls())
 
 # Raiz do projeto: setwd vale no console; root.dir faz o knitr usar a mesma pasta em todos os chunks
-setwd("G:/Meu Drive/ufmg/2026_2/RegCatOrd/TP1")
-knitr::opts_knit$set(root.dir = "G:/Meu Drive/ufmg/2026_2/RegCatOrd/TP1")
+setwd("G:/Meu Drive/Gabriel/ufmg/2026_2/RegCatOrd/TP1/")
+knitr::opts_knit$set(root.dir = "G:/Meu Drive/Gabriel/ufmg/2026_2/RegCatOrd/TP1/")
 
 knitr::opts_chunk$set(
     echo = TRUE,
@@ -53,33 +53,48 @@ K_CAT <- 5
 raw <- import("data/winemagv2.csv") |>
     select(-c(1, description, designation, region_1, region_2))
 
+# Definição de grupos de países (terroir) e top variedades
+velho   <- c("France", "Italy", "Spain", "Portugal", "Germany", "Austria")
+novo    <- c("US", "Chile", "Argentina", "Australia", "South Africa", "New Zealand")
+top_var <- names(sort(table(raw$variety), decreasing = TRUE))[1:6]
 
-# Obtém Quantis
+# Pontos de corte
 cortes <- raw$points |>
     quantile(probs = seq(0, 1, length.out = K_CAT + 1), type = 1, na.rm = TRUE)
 
-print(cortes)
 
-df <- raw |>
-    # pts
+wine <- raw |>
     mutate(
         log_pts = log(points),
-        points = cut(
+        points_ord = cut(
             points,
             breaks = unique(cortes),
             include.lowest = TRUE,
             labels = seq_len(length(unique(cortes)) - 1),
             ordered_result = TRUE
         ),
+        points = points_ord,
+        log_price = log(price),
 
-        #  Top 6 países produtores (EUA, França, Itália, Espanha, Portugal, Chile) + "Outros".
-        # Agrupar nas castas mais representativas (Cabernet Sauvignon, Pinot Noir, Chardonnay, Syrah, Bordeaux Blend) e "Demais Variedades"
+        # Terroir: Novo Mundo (ref), Velho Mundo, Outros
+        terroir = factor(
+            case_when(
+                country %in% velho ~ "Velho Mundo",
+                country %in% novo  ~ "Novo Mundo",
+                TRUE               ~ "Outros"
+            ),
+            levels = c("Novo Mundo", "Velho Mundo", "Outros")
+        ),
+
+        # Variedades agrupadas: Top 6 + "Outras" (ref)
+        variety_top = relevel(
+            factor(if_else(variety %in% top_var, as.character(variety), "Outras")),
+            ref = "Outras"
+        ),
 
         # todas as covariáveis de texto viram fator (nominal)
         across(where(is.character), as.factor)
     )
-
-glimpse(df)
 ```
 
 # Capítulo 1: Introdução
@@ -128,13 +143,13 @@ p_pts <- ggplot(raw, aes(x = points)) +
     theme(panel.grid.major.x = element_blank())
 
 # Resposta categorizada: K_CAT classes ordinais
-p_classes <- df |>
+p_classes <- wine |>
     count(points) |>
     ggplot(aes(x = points, y = n, fill = points)) +
     geom_col(width = 0.7) +
     geom_text(aes(label = fmt_pct(n / sum(n))), vjust = -0.5, size = 3.6) +
     scale_fill_manual(
-        values = colorRampPalette(paleta_vinho)(nlevels(df$points))
+        values = colorRampPalette(paleta_vinho)(nlevels(wine$points))
     ) +
     scale_y_continuous(labels = fmt_num, expand = expansion(mult = c(0, 0.1))) +
     labs(
@@ -147,7 +162,7 @@ p_classes <- df |>
     theme(panel.grid.major.x = element_blank())
 
 # Preço: fortemente assimétrico, por isso escala log
-p_price <- df |>
+p_price <- wine |>
     filter(!is.na(price)) |>
     ggplot(aes(x = price)) +
     geom_histogram(
@@ -168,9 +183,9 @@ p_price <- df |>
         title = "Preço da garrafa",
         subtitle = paste0(
             "Escala logarítmica | ",
-            fmt_num(sum(is.na(df$price))),
+            fmt_num(sum(is.na(wine$price))),
             " avaliações sem preço (",
-            fmt_pct(mean(is.na(df$price))),
+            fmt_pct(mean(is.na(wine$price))),
             ")"
         ),
         x = "Preço (US$, escala log)",
@@ -211,9 +226,9 @@ plot_top <- function(dados, var, titulo, n_top = 10) {
         theme(panel.grid.major.y = element_blank())
 }
 
-p_pais <- plot_top(df, country, "País produtor")
-p_variedade <- plot_top(df, variety, "Variedade (casta)")
-p_avaliador <- plot_top(df, taster_name, "Avaliador")
+p_pais <- plot_top(wine, country, "País produtor")
+p_variedade <- plot_top(wine, variety, "Variedade (casta)")
+p_avaliador <- plot_top(wine, taster_name, "Avaliador")
 
 p_pts
 p_classes
@@ -236,10 +251,10 @@ p_avaliador
 
 # Preparação dos dados da covariável contínua chave: price (preço em US$)
 # Filtramos observações com preço disponível e calculamos estatísticas por nível ordinal
-df_preco <- df |>
+wine_preco <- wine |>
     filter(!is.na(price))
 
-resumo_mediana <- df_preco |>
+resumo_mediana <- wine_preco |>
     group_by(points) |>
     summarise(
         mediana = median(price),
@@ -254,7 +269,7 @@ paleta_vinho <- c("#D9A5B3", "#B86B77", "#9E3D52", "#7A182F", "#4A0E17")
 # /==============================/
 
 # Visualização: Violino + Boxplot com outliers como pontos e todos os valores inclusos
-p_covar <- ggplot(df_preco, aes(x = points, y = price, fill = points)) +
+p_covar <- ggplot(wine_preco, aes(x = points, y = price, fill = points)) +
     # Densidade da distribuição
     geom_violin(alpha = 0.45, color = "gray40", trim = TRUE, scale = "width") +
 
@@ -328,18 +343,14 @@ p_covar
 # /==============================/
 ```
 
-```{r EDA-mapa-qualidade, fig.width=10, fig.height=5.5, dpi=300}
-
+```{r EDA-mapa-qualidade, fig.width=10, fig.height=5.2, dpi=300}
 #| label: fig-mapa-qualidade
-#| fig-cap: "Distribuição Espacial da Qualidade Média dos Vinhos por País"
 #| fig-cap: "Distribuição Espacial Global da Qualidade Média dos Vinhos por País"
 
-# 1. Carregar o Shapefile dos países
 # 1. Carregar Shapefile das fronteiras mundiais
 mapa_mundo <- st_read("data/world-administrative-boundaries", quiet = TRUE) |>
     select(name = English_Nam, geometry)
 
-# 2. Resumir a qualidade dos vinhos por país produtor
 # 2. Dicionário de harmonização com a nomenclatura oficial do shapefile
 # Corrige US -> "United States of America", England -> "U.K. of Great Britain and Northern Ireland", etc.
 de_para_paises <- c(
@@ -352,18 +363,11 @@ de_para_paises <- c(
 )
 
 # 3. Resumir qualidade por país produtor
-df_pais <- df |>
-    filter(!is.na(points), country != "") |>
-    filter(!is.na(points), country != "", country != "US_France") |>
+wine_pais <- wine |>
+    filter(!is.na(points), country != "", country != "US-France") |>
     mutate(
-        country_clean = case_when(
-            as.character(country) == "US" ~ "United States",
-            as.character(country) == "England" ~ "United Kingdom",
-            TRUE ~ as.character(country)
-        )
         country_map = coalesce(de_para_paises[as.character(country)], as.character(country))
     ) |>
-    group_by(country_clean) |>
     group_by(country_map) |>
     summarise(
         qualidade_media = mean(as.numeric(points), na.rm = TRUE),
@@ -371,26 +375,17 @@ df_pais <- df |>
         .groups = "drop"
     )
 
-# 3. Junção do mapa com os dados
 # 4. Join espacial e projeção Robinson (elegante e com menor distorção visual)
 mapa_vinho <- mapa_mundo |>
-    left_join(df_pais, by = c("name" = "country_clean"))
     filter(name != "Antarctica") |>
-    left_join(df_pais, by = c("name" = "country_map")) |>
+    left_join(wine_pais, by = c("name" = "country_map")) |>
     st_transform(crs = "+proj=robin")
 
-# 4. Gráfico do mapa coroplético de qualidade
 # Paleta contínua enológica: Champagne -> Rosé -> Rubi -> Tinto Profundo
 paleta_vinho_mapa <- c("#F5EBE6", "#E0B0BA", "#B86B77", "#8A1C36", "#4A0E17")
 
 # 5. Visualização do Mapa Coroplético
 p_mapa <- ggplot(mapa_vinho) +
-    geom_sf(aes(fill = qualidade_media), color = "gray75", linewidth = 0.15) +
-    scale_fill_viridis_c(
-        option = "magma",
-        direction = -1,
-        na.value = "#ececec",
-        name = "Qualidade Média\n(Classes 1 a 5)"
     geom_sf(aes(fill = qualidade_media), color = "white", linewidth = 0.2) +
     scale_fill_gradientn(
         colors = paleta_vinho_mapa,
@@ -406,22 +401,14 @@ p_mapa <- ggplot(mapa_vinho) +
             frame.colour = "gray75"
         )
     ) +
-    coord_sf(ylim = c(-55, 85)) +
     labs(
         title = "Distribuição Global da Qualidade dos Vinhos",
-        subtitle = "Média da categoria de pontuação por país produtor",
-        caption = "Fonte: Wine Reviews Dataset"
         subtitle = "Média da categoria ordinal de qualidade avaliada por país produtor (47 países)",
         caption = "Fonte: Wine Reviews Dataset | Projeção Robinson | Países em cinza claro não possuem registros."
     ) +
-    theme_minimal(base_size = 12) +
     theme_minimal(base_size = 11) +
     theme(
         legend.position = "bottom",
-        legend.key.width = unit(1.8, "cm"),
-        plot.title = element_text(face = "bold", size = 15, color = "#2C1820"),
-        plot.subtitle = element_text(color = "gray30", margin = margin(b = 10)),
-        panel.grid.line = element_blank()
         plot.title = element_text(face = "bold", size = 14, color = "#2C1820"),
         plot.subtitle = element_text(size = 10.5, color = "gray30", margin = margin(b = 8)),
         plot.caption = element_text(size = 8, color = "gray50", margin = margin(t = 6)),
@@ -445,16 +432,13 @@ p_mapa
 Verifique a suposição de chances proporcionais e proponha um modelo mais adequado caso ela não seja válida.
 
 ```{r validate-assumptions}
-# Chances proporcionais -> slide 2, teste de Brent |
+# 1. Ajuste do modelo sob chances proporcionais via MASS::polr para diagnóstico de Brant
+fit_polr <- polr(points ~ log_price + terroir, data = wine, Hess = TRUE)
+summary(fit_polr)
 
-# pg 17, slide 3
-# | Só podemos fazer se tem 4 ou mais
-# | Único jeito de saber quais betas não tem retas paralelas
-# | Trabalhoso (dá pra fazer tipo um lasso?)
-# | O que quer dizer se dois betas tem as retas paralelas?
-
-# O que fazer se não for válido?
-# O que fazer se for válido? Quais modelos queremos rodar
+# 2. Teste de Brant (Wald assintótico para paralelismo em cada covariável e omnibus)
+teste_brant <- brant::brant(fit_polr)
+print(teste_brant)
 ```
 
 # Capítulo 3: Modelagem:
@@ -463,33 +447,49 @@ Verifique a suposição de chances proporcionais e proponha um modelo mais adequ
 
 ### 3.1.1 Seleção de variáveis
 
-### 3.1.2 Ajuste
-
-Faca o ajuste de modelos de regressão para dados ordinais, efetuando seleção de variáveis e interpretando os resultados obtidos. \### 3.1.1 Análise de resíduos
-
 ```{r ordinal_selection}
 ```
 
 ### 3.1.2 Ajuste do modelo
 
-- Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
+Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
 
-- logit\[P(Y≤j∣x)\] = log( P(Y\>j∣x) / P(Y≤j∣x) )
+$$
+\text{logit}[P(Y \le j \mid \mathbf{x})] = \alpha_j - \beta^\top \mathbf{x} \iff \log \left( \frac{P(Y > j \mid \mathbf{x})}{P(Y \le j \mid \mathbf{x})} \right) = -\alpha_j + \beta^\top \mathbf{x}.
+$$
 
-- Vamos usar variável latente
+Sob a parametrização de Agresti (adotada no `MASS::polr` e no `VGAM::vglm(..., family = cumulative(parallel = TRUE))`), $\beta > 0$ indica aumento na probabilidade de categorias superiores de pontuação conforme o valor da covariável cresce.
 
-- Suposição de chances proporcionais \[colocar conta de razção de odds\] - Modelo está errado
+#### Variável latente:
+
+$Y^* = \beta^\top \mathbf{x} + \epsilon$, com $\epsilon \sim \text{Logística}(0, 1)$:
+
+$$
+P(Y \le j \mid \mathbf{x}) = P(Y^* \le \alpha_j) = G(\alpha_j - \beta^\top \mathbf{x}) \implies G^{-1}\big[P(Y \le j \mid \mathbf{x})\big] = \alpha_j - \beta^\top \mathbf{x}.
+$$
+
+```{r ordinal_ystar}
+```
 
 ```{r ordinal_fit}
-
-# Ajuste com a parametrização de sinal do Agresti3
-modelo_vgam <- vglm(
-    happy ~ trauma + race,
+# Ajuste do Modelo de Logitos Acumulados Proporcionais (POM) via VGAM
+ordinal_fit <- vglm(
+    points ~ log_price + terroir,
     family = cumulative(parallel = TRUE),
     data = wine
 )
 
-summary(modelo_vgam)
+summary(ordinal_fit)
+
+# Ajuste do modelo parcial (PPOM) relaxando o paralelismo para log_price
+fit_ordinal_ppom <- vglm(
+    points ~ log_price + terroir,
+    family = cumulative(parallel = FALSE ~ log_price),
+    data = wine
+)
+
+# Teste da Razão de Verossimilhança (LRT): POM vs. PPOM
+VGAM::lrtest(fit_ordinal_ppom, ordinal_fit)
 ```
 
 **Diagnóstico da Suposição e Alternativas** (Slide 2, p. 89-98): 1. *Teste de Brant* (`brant::brant(fit_polr)`): Testa individualmente cada covariável e omnibus via estatística assintótica $\chi^2$. 2. *Teste de Razão de Verossimilhança no VGAM*: Comparar modelo com `parallel = TRUE` vs. `parallel = FALSE` via `lrtest`. 3. *O Efeito do Tamanho Amostral* $N$ (Slide 2, p. 93-94): Em grandes amostras, testes formais têm poder inflacionado e rejeitam $H_0$ mesmo para diferenças irrelevantes do ponto de vista substantivo. Não se deve descartar o modelo ordinal sumariamente. 4. *Modelo de Chances Proporcionais Parciais (PPOM)* (Slide 2, p. 98): Permitir efeitos não-paralelos apenas para a covariável que viola substancialmente a suposição (`parallel = FALSE ~ log_price`). 5. *Comparação com Colapsamento* (Slide 2, p. 95-96): Avaliar estabilidade dos $\beta$ entre cortes binários sucessivos.
@@ -500,35 +500,51 @@ summary(modelo_vgam)
 
 ```
 
-## 3.2 Regressão com dados dicotonomizados
+## 3.2 Regressão com dados dicotomizados
 
-Dicotomize a variável resposta (juntando categorias), ajuste um modelo de regressão para dados binários/binomiais e compare os resultados obtidos. logit\[P(Y≤j∣x)\] = \alpha\_j - x\^t beta
+Dicotomize a variável resposta (juntando categorias), ajuste um modelo de regressão para dados binários/binomiais e compare os resultados obtidos.
 
-Distribuição: Multinomial Ordinal. O sinal negativo do polr faz com que beta\>0 indique aumento da probabilidade de notas superiores.
-
-### 3.2.1 Seleção de variáveis
-
-```{r}
-# Dicotonomizar a variável -> se tá no quantil 10% ou 5% ela vira "padrão ouro" e aí a gente compara com a comum
-```
+### 3.2.1 Seleção e definição da resposta binária
 
 ```{r bin_selection}
+# Dicotomização: "5 estrelas" (classe 5, excelência sensorial) vs "<=4 estrelas" (classes 1 a 4)
+top_cat <- 5
+
+wine <- wine |>
+    mutate(
+        points_bin = factor(
+            ifelse(as.numeric(points) == top_cat, "5 estrelas", "<=4 estrelas"),
+            levels = c("<=4 estrelas", "5 estrelas")
+        ),
+        # Resposta binária indicadora 0/1 para modelagem clássica glm (1 = sucesso: 5 estrelas)
+        y_bin = if_else(points_bin == "5 estrelas", 1, 0)
+    )
+
+table(wine$points_bin)
+prop.table(table(wine$points_bin))
 ```
 
-### 3.2.2 Ajuste do modelo
+### 3.2.2 Ajuste do modelo de regressão logística binária
+
+Para modelar a probabilidade condicional de excelência ($P(Y_{bin} = 1 \mid \mathbf{x})$), adota-se a Regressão Logística Binária canônica (GLM sob família binomial):
+
+$$
+\text{logit}[\pi(\mathbf{x})] = \log \left( \frac{\pi(\mathbf{x})}{1 - \pi(\mathbf{x})} \right) = \beta_0 + \beta_{\log(\text{price})} \log(\text{price}) + \mathbf{x}_{\text{terroir}}^\top \boldsymbol{\beta}_{\text{terroir}}
+$$
 
 ```{r bin_fit}
-# Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
-# logit[P(Y≤j∣x)] = log( P(Y>j∣x) / P(Y≤j∣x) )
-
-# Ajuste com a parametrização de sinal do Agresti3
-modelo_vgam <- vglm(
-    happy ~ trauma + race,
-    family = cumulative(parallel = TRUE),
+# Regressão Logística Binária Canônica
+modelo_bin_glm <- glm(
+    y_bin ~ log_price + terroir,
+    family = binomial(link = "logit"),
     data = wine
 )
 
-summary(modelo_vgam)
+summary(modelo_bin_glm)
+
+# Razões de Chances (Odds Ratio) e Intervalos de Confiança (95%)
+or_ci <- exp(cbind(OR = coef(modelo_bin_glm), confint.default(modelo_bin_glm)))
+print(round(or_ci, 4))
 ```
 
 ### 3.2.3 Análise de resíduos
@@ -539,33 +555,35 @@ summary(modelo_vgam)
 
 ## 3.3 Modelo que roda sem chances porporcionais pq vai bombar cpa
 
-Verifique a suposicao de chances proporcionais (feito lá atrás) e proponha um modelo mais adequado caso ela não seja válida. \### 3.2.1 Seleção de variáveis Modelo de Chances Proporcionais Parciais (PPOM - Partial Proportional Odds Model):
+Verifique a suposicao de chances proporcionais (feito lá atrás) e proponha um modelo mais adequado caso ela não seja válida.
+
+### 3.2.1 Seleção de variáveis Modelo de Chances Proporcionais Parciais (PPOM - Partial Proportional Odds Model):
 
 Ele não é tão restritivo quanto o POM (parallel = TRUE), nem tão inflacionado em parâmetros quanto o modelo irrestrito (parallel = FALSE). Ele relaxa o paralelismo apenas para a covariável que violou a suposição (log_price).
 
-```{r modelo_misterioso_selection}
+```{r ppom_selection}
 ```
 
 ### 3.3.2 Ajuste do modelo
 
-```{r modelo_misterioso_fit}
+```{r ppom_fit}
 # Modelo de Logitos Acumulados sob Chances Proporcionais (Proportional Odds Model - POM).
 # logit[P(Y≤j∣x)] = log( P(Y>j∣x) / P(Y≤j∣x) )
 
 # Ajuste com a parametrização de sinal do Agresti3
-# No chunk modelo_misterioso_fit:
+# No chunk ppom_fit:
 fit_ppom <- vglm(
-    points_ord ~ XXXXXXXXX,
+    points ~ log_price + terroir,
     family = cumulative(parallel = FALSE ~ log_price),
-    data = df
+    data = wine
 )
 
-summary(modelo_vgam)
+summary(fit_ppom)
 ```
 
 ### 3.1.2 Análise de resíduos
 
-```{r modelo_misterioso_res_analysis}
+```{r ppom_res_analysis}
 
 ```
 

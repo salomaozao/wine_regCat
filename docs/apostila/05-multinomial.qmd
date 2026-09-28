@@ -1,0 +1,154 @@
+# Respostas nominais: modelo multinomial {#sec-multinomial}
+
+## Variáveis categóricas (S2 p. 4–6)
+
+- **Nominais:** categorias sem ordem (meio de transporte, partido).
+- **Ordinais:** há ordem, mas a distância entre categorias não é quantificável (satisfação, estágio de doença, **faixa de nota de vinho**).
+
+## Distribuição multinomial (S2 p. 7–10)
+
+Para o indivíduo $i$ com $J$ categorias, o vetor indicador $\mathbf W_i=(W_{i1},\dots,W_{iJ})$ tem $W_{ij}=1$ se a resposta cai em $j$ (*one-hot*). Com probabilidades $\pi_j(\mathbf x_i)$, $\sum_j\pi_j=1$:
+
+$$
+P(\mathbf W_i=\mathbf w_i)=\prod_{j=1}^J\pi_j(\mathbf x_i)^{w_{ij}}.
+$$
+
+Com $n_i$ ensaios de mesmas covariáveis: $P=\dfrac{n_i!}{\prod_j w_{ij}!}\prod_j\pi_j^{w_{ij}}$.
+
+## Logitos de categoria de referência (S2 p. 12–17)
+
+Escolhe-se uma categoria de referência (aqui a $J$) e modelam-se $J-1$ logitos:
+
+$$
+\ln\frac{\pi_j(\mathbf x_i)}{\pi_J(\mathbf x_i)}=\alpha_j+\boldsymbol\beta_j^\top\mathbf x_i=\eta_{ij},\qquad j=1,\dots,J-1.
+$$
+
+Cada equação tem **seus próprios** $\alpha_j$ e $\boldsymbol\beta_j$. Por isso o número de parâmetros é $(J-1)(1+p)$ (S2 p. 37).
+
+**Pares sem a referência:** $\ln\dfrac{\pi_a}{\pi_b}=\eta_{ia}-\eta_{ib}$.
+
+**Probabilidades:**
+
+$$
+\pi_j(\mathbf x_i)=\frac{\exp(\eta_{ij})}{1+\sum_{h=1}^{J-1}\exp(\eta_{ih})},\quad j<J;\qquad
+\pi_J(\mathbf x_i)=\frac{1}{1+\sum_{h=1}^{J-1}\exp(\eta_{ih})}.
+$$
+
+::: callout-warning
+## ⚠️ Armadilha (Teste 5, item b, nota 7,5)
+Ao calcular $\pi_3(5)$ a resposta **esqueceu a exponencial**: somou os preditores lineares em vez de $e^{\eta}$. O correto, com $\hat\eta_1=-0{,}887+0{,}337\cdot5=0{,}799$ e $\hat\eta_2=1{,}337-0{,}268\cdot5=-0{,}001$:
+$$\hat\pi_3(5)=\frac{1}{1+e^{0{,}799}+e^{-0{,}001}}=\frac{1}{1+2{,}223+0{,}999}=0{,}237.$$
+O resultado é uma **probabilidade**, não uma "chance" (outra anotação do professor).
+:::
+
+::: callout-warning
+## ⚠️ Armadilha (Teste 4, itens a, c, d)
+- Preditores lineares com uma covariável: $\eta_{i1}=\alpha_1+\beta_1x_i$ e $\eta_{i2}=\alpha_2+\beta_2x_i$ (cada logito com seu intercepto e sua inclinação).
+- RC de Carro contra a referência (Bicicleta) por +1 na renda: $e^{\beta_1}$.
+- RC de Carro contra Ônibus: $\ln(\pi_1/\pi_2)=\eta_1-\eta_2\Rightarrow RC=e^{\beta_1-\beta_2}$. Com os números do Teste 5: $e^{0{,}337-(-0{,}268)}=e^{0{,}605}\approx1{,}83$.
+:::
+
+## Verossimilhança (S2 p. 18–21)
+
+$$
+\ln L=\sum_{i=1}^n\Big[\sum_{j=1}^{J-1}w_{ij}\,\eta_{ij}-\ln\Big(1+\sum_{j=1}^{J-1}e^{\eta_{ij}}\Big)\Big].
+$$
+
+## Interpretação (S2 p. 22–24)
+
+- Contínua: $+c$ unidades em $x_k$ multiplica a chance de $j$ **em vez da referência** por $e^{c\beta_{jk}}$.
+- Duas categorias quaisquer: $e^{c(\beta_{ak}-\beta_{bk})}$.
+
+## Exemplo: dieta dos jacarés (S2 p. 25–49)
+
+219 jacarés em 4 lagos da Flórida; resposta = alimento principal (Peixe, Invertebrado, Réptil, Ave, Outro); covariáveis Lago (L), Gênero (G) e Tamanho (S, ≤ 2,3 m ou > 2,3 m). Abaixo, o ajuste do modelo final `L + S` com os dados colapsados sobre gênero, que reproduz os slides.
+
+```{r}
+library(VGAM)
+library(dplyr)
+jac <- data.frame(
+  Lago    = rep(c("Hancock", "Oklawaha", "Trafford", "George"), each = 4),
+  Genero  = rep(c("Male", "Male", "Female", "Female"), 4),
+  Tamanho = rep(c("<= 2.3", "> 2.3", "<= 2.3", "> 2.3"), 4),
+  Peixe        = c(7, 4, 16, 3, 2, 13, 3, 0, 3, 8, 2, 0, 13, 9, 3, 8),
+  Invertebrado = c(1, 0, 3, 0, 2, 7, 9, 1, 7, 6, 4, 1, 10, 0, 9, 1),
+  Reptil       = c(0, 0, 2, 1, 0, 6, 1, 0, 1, 6, 1, 0, 0, 0, 1, 0),
+  Ave          = c(0, 1, 2, 2, 0, 0, 0, 1, 0, 3, 1, 0, 2, 1, 0, 0),
+  Outro        = c(5, 2, 3, 3, 1, 0, 2, 0, 1, 5, 4, 0, 2, 2, 1, 1)
+)
+jac_col <- jac |>
+  group_by(Lago, Tamanho) |>
+  summarise(across(Peixe:Outro, sum), .groups = "drop") |>
+  mutate(Lago = relevel(factor(Lago), ref = "George"),
+         Tamanho = relevel(factor(Tamanho), ref = "> 2.3"))
+
+# Peixe na última coluna = categoria de referência (padrão do VGAM)
+fit_ls <- vglm(cbind(Invertebrado, Reptil, Ave, Outro, Peixe) ~ Tamanho + Lago,
+               family = multinomial, data = jac_col)
+round(coef(summary(fit_ls))[, 1:2], 3)
+```
+
+A equação ":1" (Invertebrado contra Peixe) dá $\hat\beta_{\text{pequeno}}=1{,}458$ (EP 0,396). **RC** $=e^{1{,}458}\approx4{,}3$, IC 95% $=e^{1{,}458\pm1{,}96(0{,}396)}=(2{,}0;\,9{,}3)$: para um mesmo lago, a chance de um jacaré pequeno preferir invertebrados a peixe é cerca de 4,3 vezes a de um grande.
+
+## Seleção e qualidade do ajuste (S2 p. 38–44)
+
+- **$X^2$ de Pearson:** $\sum(\text{obs}-\text{esp})^2/\text{esp}$.
+- **Deviance $G^2$:** $2\sum\text{obs}\ln(\text{obs}/\text{esp})$, que compara o modelo com o saturado.
+- **Dados esparsos:** com muitas células pequenas ou zero, $X^2$ e $G^2$ **não** seguem $\chi^2$ e não servem para testar o ajuste global. **A diferença** de deviances entre modelos aninhados continua válida (TRV).
+- Diagnóstico por célula: resíduos padronizados; no exemplo, só 2 de 40 passam de $|2|$.
+
+::: callout-note
+## 🍷 No projeto: ★ Contexto (com um uso ★★)
+**Por quê.** A nota do vinho é ordinal, então o multinomial nominal não é o modelo principal: ele **ignora a ordem**, usa $(J-1)$ vezes mais parâmetros e dá testes com menos poder (S2 p. 51).
+
+**Onde ele entra.**
+
+1. **Referência de parcimônia (★★):** ajuste `vglm(points_ord ~ log_price + terroir, multinomial)` e compare o AIC com o modelo de chances proporcionais. Com 5 classes, o multinomial tem 4 vezes mais coeficientes; se o AIC do ordinal for parecido, a restrição ordinal "custa pouco".
+2. **Última alternativa da lista dos slides** (S2 p. 98): se nada ordinal servir, usa-se o multinomial e a ordem entra só na interpretação.
+3. **Esparsidade:** agrupe `variety` e `country` antes de modelar (Top‑k + "Outras"). Células vazias inflam EPs e podem impedir a convergência.
+:::
+
+
+## Em R com os vinhos {#sec-r-multinomial}
+
+O multinomial trata as 5 classes **sem ordem**. Serve de referência de parcimônia para o modelo ordinal.
+
+```{r}
+source("R/prep_vinhos.R")
+fit_mult <- vglm(points_ord ~ log_price + terroir, family = multinomial(refLevel = 1), data = df)
+fit_pom  <- vglm(points_ord ~ log_price + terroir,
+                 family = cumulative(parallel = TRUE, reverse = TRUE), data = df)
+```
+
+**1. Número de parâmetros e AIC.**
+
+```{r}
+tibble(modelo = c("Multinomial (nominal)", "Chances proporcionais"),
+       parametros = c(length(coef(fit_mult)), length(coef(fit_pom))),
+       logLik = c(logLik(fit_mult), logLik(fit_pom)),
+       AIC = c(AIC(fit_mult), AIC(fit_pom)))
+```
+
+O multinomial usa 16 parâmetros contra 7 e tem verossimilhança maior, como deve (é mais flexível). A questão é se o ganho compensa uma interpretação muito mais complexa.
+
+**2. Coeficientes do preço em cada logito contra a classe 1.** Se crescem com a classe, a ordem aparece nos próprios dados:
+
+```{r}
+cf <- coef(fit_mult)
+cf[grep("log_price", names(cf))] |> round(3)
+```
+
+**3. Probabilidades pela fórmula** $\pi_j=e^{\eta_j}/(1+\sum_h e^{\eta_h})$, conferidas com `predict`:
+
+```{r}
+nd  <- data.frame(log_price = log(30), terroir = factor("Velho Mundo", levels(df$terroir)))
+eta <- predict(fit_mult, nd)                  # 4 logitos contra a classe 1
+p_mao <- c(1, exp(eta)) / (1 + sum(exp(eta)))
+rbind(mao = p_mao, predict = as.numeric(predict(fit_mult, nd, type = "response"))) |> round(4)
+```
+
+**4. RC entre duas classes fora da referência** (classe 5 contra classe 4, por +1 em log-preço) $=e^{\beta_5-\beta_4}$:
+
+```{r}
+unname(exp(cf["log_price:4"] - cf["log_price:3"]))   # ":4" = classe 5 vs 1; ":3" = classe 4 vs 1
+```

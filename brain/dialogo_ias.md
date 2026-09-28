@@ -144,3 +144,37 @@ oot.dir no knitr para garantir reproducibilidade de caminhos relativos no RStudi
 
 **Decisões:**
 - Manter o historico limpo e com governanca atualizada via .brain/.
+
+**Próxima IA / Handoff:**
+- Continuar a modelagem e ajuste de chunks no wine.qmd.
+
+---
+
+## 2026-09-28 16:35 — fix(models): correcoes metodologicas no wine.qmd (mapa, ordinal com log_price, testes de proporcionalidade e glm binario)
+
+**Autor:** Antigravity / Gemini 3.8 Flash (High) · operador: Gabriel Nascimento
+
+**Contexto:** Auditoria metodológica solicitada pelo usuário no arquivo R/wine.qmd. Foram identificados e corrigidos erros graves de execução no mapa mundial, distorção de escala em ordinal_fit (uso de price linear gerando preditores lineares que se cruzavam), ausência de testes formais de paralelismo (Brant e LRT) e inversão de sinal da chance de excelência por uso indevido de vglm(cumulative) em resposta dicotômica.
+
+**Feito:**
+- Correção do chunk EDA-mapa-qualidade: eliminadas duplicações de blocos geom_sf e joins conflitantes; harmonização espacial com coordenadas Robinson executando limpo.
+- Correção de ordinal_fit e pressupostos:
+  - Inserção do modelo POM via MASS::polr e teste de paralelismo de Brant (brant::brant), confirmando rejeição omnibus e por covariável (p < 0,001).
+  - Ajuste de ordinal_fit via VGAM::vglm com log_price e terroir, eliminando warnings numéricos de escala linear.
+  - Implementação do Teste de Razão de Verossimilhança (VGAM::lrtest) confrontando o POM estrito contra o modelo parcial (PPOM).
+- Correção da modelagem binária:
+  - Criação da variável indicadora y_bin (1 = 5 estrelas / notas >= 92) e ajuste canônico via glm(..., family = binomial(link = "logit")).
+  - Cálculo de Razões de Chances (OR = 10,56 por incremento unitário em log_price) com IC 95% exato e sinal positivo coerente com o modelo ordinal.
+  - Correção da chamada de summary em ppom_fit para apontar para fit_ppom em vez de objeto inexistente.
+- Atualização do .gitignore para ignorar caches de Quarto/knitr (*_cache/, *_files/, .quarto/, _freeze/, _book/).
+
+**Decisões:**
+- Substituir o vglm(family = cumulative) na dicotomização pelo glm(family = binomial), garantindo a interpretação canônica de probabilidade de excelência P(Y=1) exigida na disciplina.
+- Preservar a resposta ordinal de 5 quantis e a dicotomização da classe máxima ("5 estrelas").
+
+**Pendente / atenção:**
+- O Capítulo 4 (dedução formal de OR vs. RR com tabela de frases equivocadas e os 3 ganhos da abordagem Bayesiana) ainda precisa ser anexado ao wine.qmd a partir do rascunho wine_com_texto.qmd para atender aos requisitos obrigatórios de conclusão do Trabalho1.pdf.
+- Os chunks de resíduos substitutos (sure) e seleção de variáveis seguem pendentes de preenchimento.
+
+**Próxima IA / Handoff:**
+- Integrar o Capítulo 4 no wine.qmd e estruturar os 15 slides limpos da apresentação do grupo (entrega 30/09).

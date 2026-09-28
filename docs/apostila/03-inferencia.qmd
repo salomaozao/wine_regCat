@@ -1,0 +1,214 @@
+# Estimação, intervalos, testes e seleção {#sec-inferencia}
+
+```{r}
+#| include: false
+library(ggplot2)
+theme_set(theme_minimal(base_size = 12))
+```
+
+## Estimador de máxima verossimilhança (S1 p. 33–35)
+
+Sob condições de regularidade, o EMV $\hat{\boldsymbol\beta}$ é consistente e
+
+$$
+\hat{\boldsymbol\beta}\ \xrightarrow{d}\ N_p\big(\boldsymbol\beta,\ \mathcal I^{-1}(\boldsymbol\beta)\big).
+$$
+
+- **Informação de Fisher esperada**: $\mathcal I(\boldsymbol\beta)=-E\!\left[\dfrac{\partial^2\ln L}{\partial\boldsymbol\beta\,\partial\boldsymbol\beta^\top}\right]$.
+- **Informação observada**: $J(\hat{\boldsymbol\beta})=-\dfrac{\partial^2\ln L}{\partial\boldsymbol\beta\,\partial\boldsymbol\beta^\top}\Big|_{\hat{\boldsymbol\beta}}$ (a Hessiana no ponto estimado).
+- Erro-padrão: $EP(\hat\beta_j)=\sqrt{[\widehat{\mathrm{Var}}(\hat{\boldsymbol\beta})]_{jj}}$.
+
+::: callout-tip
+## 💻 No R: por que os EPs diferem entre pacotes (S2 p. 77)
+`VGAM::vglm` usa a informação **esperada**; `MASS::polr` e `ordinal::clm` usam a **observada** (Newton–Raphson). As estimativas pontuais coincidem e os EPs diferem um pouco. Com $N\approx121$ mil, a diferença é desprezível.
+:::
+
+## Três formas de obter o EMV (S1 p. 36–54)
+
+```{r}
+set.seed(123)
+n <- 500
+x <- rnorm(n)
+eta <- -0.5 + 1.2 * x
+dados <- data.frame(y = rbinom(n, 1, plogis(eta)), x = x)
+
+fit_logit   <- glm(y ~ x, family = binomial(link = "logit"),   data = dados)
+fit_probit  <- glm(y ~ x, family = binomial(link = "probit"),  data = dados)
+fit_cloglog <- glm(y ~ x, family = binomial(link = "cloglog"), data = dados)
+round(coef(summary(fit_logit)), 4)
+```
+
+A mesma estimativa por **otimização numérica** da log-verossimilhança, útil quando não há pacote para o modelo (S1 p. 43–48):
+
+```{r}
+log_lik <- function(beta, y, x) {
+  p <- plogis(beta[1] + beta[2] * x)
+  sum(y * log(p) + (1 - y) * log(1 - p))
+}
+opt <- optim(c(0, 0), log_lik, y = dados$y, x = dados$x, method = "BFGS",
+             hessian = TRUE, control = list(fnscale = -1))
+cbind(estimativa = opt$par, EP = sqrt(diag(solve(-opt$hessian))))
+```
+
+Os slides também mostram `rstan::optimizing()` (L-BFGS), que devolve o mesmo ponto (S1 p. 49–54). É a ponte para o [capítulo -@sec-bayes]: sem priori informativa, o modo da posteriori é o EMV.
+
+## Intervalos de confiança (S1 p. 55–58)
+
+**Wald:** $\;IC(\beta_j;1-\alpha)=\hat\beta_j\pm z_{\alpha/2}\,EP(\hat\beta_j)$.
+
+**Perfil de verossimilhança:** inverte o TRV reestimando os demais parâmetros. É mais preciso em amostras pequenas ou com probabilidades perto de 0 ou 1. No R: `confint(fit)`.
+
+**Para a RC:** como $e^z$ é monótona, basta exponenciar os limites:
+
+$$
+IC(RC_j)=\big[e^{\hat\beta_j-z_{\alpha/2}EP},\ e^{\hat\beta_j+z_{\alpha/2}EP}\big].
+$$
+
+O intervalo **não** é simétrico em torno de $e^{\hat\beta_j}$.
+
+::: callout-warning
+## ⚠️ Armadilha (Teste 2, item e)
+O IC calculado saiu com os limites trocados ($[0{,}065;\,0{,}021]$). Com $\hat\beta=0{,}043$ e $EP=0{,}0114$:
+$0{,}043\pm1{,}96(0{,}0114)=[0{,}021;\ 0{,}065]$ e, para a RC, $[e^{0{,}021};\,e^{0{,}065}]=[1{,}021;\ 1{,}067]$. Como o intervalo da RC **não contém 1**, o efeito da idade é significativo a 5%. O professor anotou justamente a falta dessa conclusão e da interpretação da RC.
+:::
+
+## Testes de hipóteses (S1 p. 59–60, 73–75)
+
+**Wald (um coeficiente):** $H_0:\beta_j=0$, $\;Z=\hat\beta_j/EP(\hat\beta_j)\xrightarrow{d}N(0,1)$.
+
+**Razão de verossimilhanças (modelos aninhados):** modelo reduzido com $k$ parâmetros contra completo com $p>k$:
+
+$$
+\Lambda=2\big[\ln L(\hat{\boldsymbol\beta}_C)-\ln L(\hat{\boldsymbol\beta}_R)\big]=D_R-D_C\ \xrightarrow{d}\ \chi^2_{p-k}.
+$$
+
+**Deviance:** $D=-2\ln L$ (a menos de constante). Cada preditor inútil reduz a deviance em cerca de 1; um preditor informativo reduz bem mais (S1 p. 73).
+
+```{r}
+fit0 <- glm(y ~ 1, family = binomial, data = dados)
+anova(fit0, fit_logit, test = "LRT")
+```
+
+## AIC (S1 p. 76–78)
+
+$$
+AIC=-2\ln L(\hat{\boldsymbol\beta})+2p.
+$$
+
+O AIC é **a** ferramenta para comparar funções de ligação, porque:
+
+1. logito, probito e cloglog **não são aninhados**, então o TRV não se aplica;
+2. todos têm a mesma distribuição da resposta (Bernoulli), então $\ln L$ está na mesma escala;
+3. exige **os mesmos dados e a mesma resposta** em todos os modelos.
+
+```{r}
+AIC(fit_logit, fit_probit, fit_cloglog)
+```
+
+::: callout-note
+## 🍷 No projeto: ★★★ Essencial. Seleção de variáveis com $N$ grande
+O enunciado pede **seleção de variáveis**. O roteiro:
+
+1. Modelos aninhados: `m0: ~1`, `m1: ~log_price`, `m2: +terroir`, `m3: +variety_top`, e eventualmente `m4: +log_price:terroir`.
+2. Tabela com deviance, gl, TRV (`anova(m1, m2, m3)`) e AIC/BIC.
+
+**Cuidado com o N.** Com $N\approx121$ mil, o TRV rejeita $H_0$ para qualquer efeito minúsculo, então "p < 0,001" em tudo não seleciona nada. Complemente com:
+
+- **BIC** ($-2\ln L+p\ln N$), que penaliza mais com $N$ grande;
+- a **magnitude** das RCs (efeito que muda a chance em 2% é irrelevante na prática);
+- a queda relativa da deviance.
+
+**Comparar ligações.** Ajuste `polr(..., method = "logistic" / "probit" / "cloglog" / "loglog")` e compare por AIC. É barato e responde "por que logito?".
+
+**IC.** `confint(polr)` usa perfil e pode demorar com 121 mil linhas. `confint.default()` (Wald) dá praticamente o mesmo resultado com $N$ grande.
+:::
+
+::: callout-warning
+## ⚠️ AIC só compara modelos ajustados às **mesmas linhas**
+Se `variety_top` ou `terroir` tiverem `NA` em algumas linhas, `m3` será ajustado em menos observações que `m2` e o AIC deixa de ser comparável. Filtre os `NA` de **todas** as covariáveis candidatas antes de ajustar qualquer modelo.
+:::
+
+
+## Em R com os vinhos {#sec-r-inferencia}
+
+```{r}
+source("R/prep_vinhos.R")
+fit_bin <- glm(points_bin ~ log_price + terroir, family = binomial, data = df)
+```
+
+**1. Erro-padrão, Wald e IC "na mão"** a partir da matriz de covariância ($\mathcal I^{-1}$):
+
+```{r}
+b  <- coef(fit_bin)
+ep <- sqrt(diag(vcov(fit_bin)))
+tibble(termo = names(b), beta = b, EP = ep, z = b / ep,
+       p_valor = 2 * pnorm(-abs(b / ep)),
+       IC_inf = b - 1.96 * ep, IC_sup = b + 1.96 * ep,
+       RC = exp(b), RC_inf = exp(IC_inf), RC_sup = exp(IC_sup)) |>
+  mutate(across(where(is.numeric), \(v) signif(v, 4)))
+```
+
+Compare com as funções prontas:
+
+```{r}
+round(coef(summary(fit_bin)), 4)
+round(confint.default(fit_bin), 4)        # Wald
+```
+
+::: callout-tip
+## 💻 Perfil × Wald com N grande
+`confint(fit_bin)` (perfil) refaz um ajuste para cada ponto de cada parâmetro. Com 121 mil linhas demora e, como mostra o bloco abaixo numa subamostra, dá praticamente o mesmo resultado que o Wald.
+:::
+
+```{r}
+set.seed(262)
+sub <- slice_sample(df, n = 5000)
+fit_sub <- glm(points_bin ~ log_price + terroir, family = binomial, data = sub)
+cbind(Wald = confint.default(fit_sub)["log_price", ], Perfil = confint(fit_sub)["log_price", ])
+```
+
+**2. Seleção por TRV, calculando a estatística pela definição.**
+
+```{r}
+m0 <- glm(points_bin ~ 1,                                 family = binomial, data = df)
+m1 <- glm(points_bin ~ log_price,                         family = binomial, data = df)
+m2 <- glm(points_bin ~ log_price + terroir,               family = binomial, data = df)
+m3 <- glm(points_bin ~ log_price + terroir + variety_top, family = binomial, data = df)
+
+trv <- function(red, comp) {
+  L  <- 2 * (as.numeric(logLik(comp)) - as.numeric(logLik(red)))   # = deviance(red) - deviance(comp)
+  gl <- attr(logLik(comp), "df") - attr(logLik(red), "df")
+  c(TRV = L, gl = gl, p = pchisq(L, gl, lower.tail = FALSE))
+}
+rbind(`m0 -> m1` = trv(m0, m1), `m1 -> m2` = trv(m1, m2), `m2 -> m3` = trv(m2, m3)) |> signif(4)
+anova(m0, m1, m2, m3, test = "LRT")       # a mesma coisa
+```
+
+**3. Tabela de seleção com AIC, BIC e a queda de deviance.**
+
+```{r}
+mods <- list(m0 = m0, m1 = m1, m2 = m2, m3 = m3)
+tibble(modelo   = names(mods),
+       p        = sapply(mods, \(m) attr(logLik(m), "df")),
+       deviance = sapply(mods, deviance),
+       AIC      = sapply(mods, AIC),
+       AIC_mao  = sapply(mods, \(m) -2 * as.numeric(logLik(m)) + 2 * attr(logLik(m), "df")),
+       BIC      = sapply(mods, BIC)) |>
+  mutate(queda_dev_pct = round(100 * (first(deviance) - deviance) / first(deviance), 2))
+```
+
+**4. Comparar ligações por AIC** (não aninhadas, mesmos dados):
+
+```{r}
+links <- c("logit", "probit", "cloglog")
+sapply(links, \(l) AIC(glm(points_bin ~ log_price + terroir, family = binomial(link = l), data = df)))
+```
+
+**5. EMV por `optim`**, para quando não houver pacote para o modelo:
+
+```{r}
+X <- model.matrix(fit_bin); y <- df$points_bin
+nll <- function(beta) { eta <- X %*% beta; -sum(y * eta - log1p(exp(eta))) }
+opt <- optim(rep(0, ncol(X)), nll, method = "BFGS", hessian = TRUE, control = list(maxit = 500))
+cbind(optim = opt$par, glm = coef(fit_bin), EP_optim = sqrt(diag(solve(opt$hessian)))) |> round(4)
+```

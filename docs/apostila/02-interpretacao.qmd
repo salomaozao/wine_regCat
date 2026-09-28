@@ -1,0 +1,241 @@
+# Chance, razão de chances e risco relativo {#sec-interp}
+
+```{r}
+#| include: false
+library(ggplot2)
+library(dplyr)
+theme_set(theme_minimal(base_size = 12))
+vinho <- c("#7A182F", "#B86B77", "#D9A5B3", "#4A0E17")
+```
+
+## Chance (S1 p. 19–20)
+
+$$
+\text{chance}_i=\frac{p_i}{1-p_i}\quad\Longrightarrow\quad \ln(\text{chance}_i)=\beta_0+\beta_1x_i\quad\Longrightarrow\quad \text{chance}_i=e^{\beta_0}\,e^{\beta_1x_i}.
+$$
+
+- $e^{\beta_0}$ é a chance quando $x_i=0$.
+- $e^{\beta_1}$ é o fator que **multiplica** a chance quando $x_i$ aumenta 1 unidade.
+
+Probabilidade $0{,}75$ corresponde a chance $3$ ("3 para 1"). Chance e probabilidade só são parecidas quando $p$ é pequeno.
+
+## Razão de chances (RC ou OR)
+
+### Covariável contínua (S1 p. 21–22)
+
+$$
+RC=\frac{\text{chance}(x_i+1)}{\text{chance}(x_i)}=e^{\beta_1}.
+$$
+
+- $\beta_1>0\Rightarrow RC>1$: ex. $RC=1{,}25$ é **aumento de 25% na chance**.
+- $\beta_1=0\Rightarrow RC=1$: sem efeito.
+- $\beta_1<0\Rightarrow RC<1$: ex. $RC=0{,}80$ é **redução de 20% na chance**.
+
+Para um aumento de $c$ unidades: $RC=e^{c\beta_1}$.
+
+### Covariável binária (S1 p. 23–24)
+
+Com $d_i\in\{0,1\}$: $RC=\dfrac{e^{\beta_0+\beta_1}}{e^{\beta_0}}=e^{\beta_1}$, a chance no grupo exposto dividida pela chance no grupo de referência.
+
+### Covariável categórica com $K$ níveis (S1 p. 25–26)
+
+Criam-se $K-1$ indicadoras (a categoria 1 é a referência):
+
+$$
+\ln\frac{p_i}{1-p_i}=\beta_0+\beta_1x_{i2}+\dots+\beta_{K-1}x_{iK}.
+$$
+
+- Categoria $k$ contra a referência: $RC_{k\,vs\,1}=e^{\beta_{k-1}}$.
+- Duas categorias fora da referência, $a$ contra $b$: $RC_{a\,vs\,b}=e^{\beta_{a-1}-\beta_{b-1}}$.
+
+O erro-padrão desta última usa a covariância (S1 p. 58):
+
+$$
+EP\big(\ln\widehat{RC}_{a\,vs\,b}\big)=\sqrt{\widehat{\mathrm{Var}}(\hat\beta_{a-1})+\widehat{\mathrm{Var}}(\hat\beta_{b-1})-2\,\widehat{\mathrm{Cov}}(\hat\beta_{a-1},\hat\beta_{b-1})}.
+$$
+
+::: callout-warning
+## ⚠️ Armadilha (Teste 2, itens c e d, nota 0)
+Para comparar "Moderado" com "Alto" (nenhum é a referência), a resposta **dividiu os coeficientes** ($\hat\beta_{\text{alto}}/\hat\beta_{\text{mod}}$). O correto é **subtrair e exponenciar**:
+$RC_{\text{alto vs mod}}=\exp(-1{,}455-(-0{,}765))=\exp(-0{,}690)\approx0{,}50$, ou seja, a chance de hipertensão no nível Alto é metade da chance no Moderado (redução de 50%).
+Para Baixo → Moderado (Baixo é a referência): $RC=\exp(-0{,}765)\approx0{,}47$.
+:::
+
+::: callout-note
+## 🍷 No projeto: ★★★ Essencial. RC por **duplicação** do preço
+Como o modelo usa $\log(\text{price})$, "aumentar 1 unidade" significa multiplicar o preço por $e\approx2{,}72$, o que é difícil de narrar. Use a **duplicação**: aumentar $\ln 2$ em $\log(\text{price})$ dá
+
+$$
+RC_{\text{dobro}}=e^{\beta\ln 2}=2^{\beta}.
+$$
+
+Com $\hat\beta=2{,}151$ (modelo ordinal validado): $2^{2{,}151}\approx4{,}44$. Leitura oral: "vinhos com o dobro do preço têm chance cerca de 4,4 vezes maior de estar acima de qualquer faixa de nota, com a origem fixa".
+
+Para o `terroir` (categórica), compare Velho × Novo Mundo pela referência e, se quiser Velho × Outros, use a diferença de coeficientes com a covariância (`vcov(modelo)`).
+:::
+
+## Da razão de chances para a probabilidade (S1 p. 67–72, 99–100, 120–122)
+
+A relação entre $x$ e $p$ **não é linear**: a mudança em probabilidade causada por $+1$ em $x$ depende do ponto de partida.
+
+$$
+\Delta p = \text{logit}^{-1}(\beta_0+\beta_1(x+1)) - \text{logit}^{-1}(\beta_0+\beta_1 x).
+$$
+
+Nos slides (Default, S1 p. 68–69): no saldo médio, $+1$ desvio z leva a probabilidade de inadimplência de $0{,}002$ para $0{,}34$; do nível 1 para 2 o salto é outro. Os slides recomendam:
+
+- falar em **probabilidade** para o público ("34 pessoas a mais em cada 100", S1 p. 72);
+- usar **RC** porque ela não depende do ponto de avaliação;
+- **centralizar** as covariáveis para o intercepto ter sentido (S1 p. 99): no exemplo Pima, IMC = 0 não existe.
+
+::: callout-tip
+## 💻 No R
+```r
+invlogit <- function(x) exp(x) / (1 + exp(x))    # ou plogis()
+predict(modelo, newdata = data.frame(...), type = "response")
+```
+:::
+
+## Interação (S1 p. 111–119)
+
+Com o termo $x_1x_2$ no modelo, o efeito principal de $x_1$ vale para $x_2=0$ (na média, se padronizado). O coeficiente da interação **modifica** a RC: $RC_{x_1}(x_2)=\exp(\beta_1+\beta_{12}x_2)$. No exemplo Pima, $\hat\beta_{\text{ped:glu}}=-1{,}15$ implica que a RC de `ped` é multiplicada por $e^{-1{,}15}\approx0{,}32$ (queda de 68%) a cada unidade padronizada de `glu`.
+
+::: callout-note
+## 🍷 No projeto: ★★ Útil. Interação preço × origem
+Uma pergunta natural da banca é se o prêmio do Velho Mundo depende da faixa de preço. Teste `log_price * terroir` por TRV. Se entrar, apresente a RC do Velho Mundo **em dois preços** (ex.: US\$ 15 e US\$ 60), não o coeficiente isolado.
+:::
+
+## Risco relativo e a relação com a RC {#sec-or-rr}
+
+Com probabilidades $\pi_1$ (exposto) e $\pi_0$ (referência):
+
+$$
+RR=\frac{\pi_1}{\pi_0},\qquad RC=\frac{\pi_1/(1-\pi_1)}{\pi_0/(1-\pi_0)}=RR\cdot\frac{1-\pi_0}{1-\pi_1}.
+$$
+
+- Se $RR>1$, então $\pi_1>\pi_0$, o fator $\frac{1-\pi_0}{1-\pi_1}$ é maior que 1, e **a RC fica mais longe de 1 que o RR** (a RC exagera o efeito na escala de probabilidade).
+- Se o evento é raro ($\pi_0,\pi_1\to0$), o fator tende a 1 e $RC\approx RR$. **Só aí** a RC aproxima o RR.
+- Para uma RC fixa, o RR depende da prevalência de base: $\;RR=\dfrac{RC}{1-\pi_0+RC\,\pi_0}$.
+
+```{r}
+#| label: fig-or-rr
+#| fig-cap: "Risco relativo implicado por uma razão de chances fixa, em função da probabilidade de base. A linha vertical marca a prevalência de vinhos com 90 pontos ou mais (37,5%)."
+expand.grid(pi0 = seq(0.001, 0.95, length.out = 300), RC = c(1.5, 2, 4.44)) |>
+  mutate(RR = RC / (1 - pi0 + RC * pi0),
+         RC = factor(paste("RC =", RC))) |>
+  ggplot(aes(pi0, RR, colour = RC)) +
+  geom_line(linewidth = 1) +
+  geom_vline(xintercept = 0.375, linetype = 2, colour = "grey40") +
+  scale_colour_manual(values = vinho[c(3, 2, 1)]) +
+  scale_x_continuous(labels = scales::percent) +
+  labs(x = expression("Probabilidade de base " * pi[0]), y = "Risco relativo", colour = NULL)
+```
+
+::: callout-note
+## 🍷 No projeto: ★★★ Essencial. O evento "90+ pontos" **não é raro**
+A prevalência de vinhos com 90 pontos ou mais é **37,5%** (validado). Por isso a RC do modelo binário **não pode** ser lida como RR.
+
+**Exemplo concreto** (modelo binário validado, Novo Mundo, sem outras covariáveis):
+
+| Preço | $\hat\eta$ | $\hat p$ (90+) | Chance |
+|---|---|---|---|
+| US\$ 20 | $-7{,}926+2{,}178\ln 20=-1{,}401$ | 0,198 | 0,247 |
+| US\$ 40 | $-7{,}926+2{,}178\ln 40=\phantom{-}0{,}109$ | 0,527 | 1,115 |
+
+$RC=1{,}115/0{,}247\approx4{,}5$, mas $RR=0{,}527/0{,}198\approx2{,}7$. **Dobrar o preço multiplica a chance por 4,5, mas a probabilidade só por 2,7.** Esse par de números é o melhor gancho para o slide de frases equivocadas.
+
+**Como aplicar.** Calcule $\hat p$ com `predict(fit_bin, newdata, type = "response")` em dois preços, mostre só a tabela no slide e faça a leitura oralmente.
+:::
+
+## Frases equivocadas sobre RC e RR {#sec-frases}
+
+O enunciado pede que o grupo **inclua frases equivocadas**. Abaixo, frases erradas com a correção. As marcadas com 🍷 já vêm no contexto dos vinhos.
+
+| # | Frase equivocada | Por que está errada | Forma correta |
+|---|---|---|---|
+| 1 🍷 | "Vinhos com o dobro do preço têm 4,5 vezes **mais probabilidade** de ter 90+." | 4,5 é a RC; a probabilidade subiu 2,7 vezes (RR). | "…têm **chance** 4,5 vezes maior." |
+| 2 | "RC = 1,44 significa **44% mais probabilidade**." | Aumento de 44% é na chance. | "Aumento de 44% na chance." (Teste 5, erro corrigido pelo professor) |
+| 3 | "A RC é uma boa aproximação do RR." | Só quando o evento é raro. Com 37,5% de prevalência, a RC exagera. | "RC ≈ RR apenas se $\pi_0$ e $\pi_1$ são pequenos." |
+| 4 | "RC = 0,5 significa que o risco cai pela metade." | Metade da **chance**; o risco cai menos que isso quando o evento é comum. | "A chance cai pela metade." |
+| 5 🍷 | "A RC acumulada de 4,4 significa 4,4 vezes mais chance de estar **na categoria 5**." | No modelo de chances proporcionais a RC compara $P(Y>j)$ contra $P(Y\le j)$, para **qualquer** corte $j$. | "…4,4 vezes a chance de estar **acima de qualquer faixa**." |
+| 6 | "Como RC = 8,6 no preço, o preço é o **melhor preditor**." | A RC depende da unidade da covariável; poder preditivo se avalia com AUC, deviance ou AIC. | Compare pela variação da deviance ou por RC padronizadas. |
+| 7 🍷 | "O Velho Mundo tem RC 1,30, então **30% mais vinhos** do Velho Mundo passam de 90." | Confunde RC com diferença de proporções. | "A chance de estar acima de cada faixa é 30% maior, a preço fixo." |
+| 8 | "O IC da RC contém 1, então **não há efeito**." | Não rejeitar $H_0$ não prova ausência de efeito. | "Os dados não trazem evidência de efeito ao nível de 5%." |
+| 9 | "RC do Moderado contra o Alto é $\hat\beta_{\text{mod}}/\hat\beta_{\text{alto}}$." | A RC entre categorias não-referência é $\exp(\hat\beta_a-\hat\beta_b)$. | (Teste 2, erro corrigido) |
+| 10 | "Se a RC é 4,5 para 20 → 40 dólares, a probabilidade também cresce 4,5 vezes de 40 → 80." | A RC é constante, o RR não: depende da probabilidade de partida. | Reporte probabilidades em pontos específicos. |
+
+::: callout-tip
+## 💻 Sugestão de slide
+Uma tabela com duas colunas ("Frase" e "✔ / ✘") e a tabela de probabilidades de US\$ 20 × US\$ 40. A explicação é oral, como exige o enunciado.
+:::
+
+## Em R com os vinhos {#sec-r-interp}
+
+```{r}
+source("R/prep_vinhos.R")
+fit_bin <- glm(points_bin ~ log_price + terroir, family = binomial, data = df)
+b <- coef(fit_bin)
+V <- vcov(fit_bin)
+```
+
+**1. Coeficientes → razões de chances.**
+
+```{r}
+tibble(termo = names(b), beta = b, RC = exp(b)) |> mutate(across(-termo, \(v) round(v, 3)))
+```
+
+**2. RC por duplicação e para outros múltiplos do preço** ($e^{\beta\ln k}=k^\beta$):
+
+```{r}
+k <- c(1.5, 2, 3, 10)
+tibble(multiplica_preco_por = k, RC = k^b["log_price"])
+```
+
+**3. RC entre duas categorias fora da referência** (Velho Mundo × Outros), com EP pela covariância:
+
+```{r}
+d   <- unname(b["terroirVelho Mundo"] - b["terroirOutros"])
+ep  <- sqrt(V["terroirVelho Mundo", "terroirVelho Mundo"] + V["terroirOutros", "terroirOutros"] -
+            2 * V["terroirVelho Mundo", "terroirOutros"])
+c(RC = exp(d), IC_inf = exp(d - 1.96 * ep), IC_sup = exp(d + 1.96 * ep))
+```
+
+Atalho equivalente: mudar a referência com `relevel()` e reajustar.
+
+```{r}
+fit_rel <- update(fit_bin, data = mutate(df, terroir = relevel(terroir, ref = "Outros")))
+exp(coef(fit_rel)["terroirVelho Mundo"])
+```
+
+**4. Probabilidades, chances, RC e RR em preços específicos.**
+
+```{r}
+perfis <- tibble(price = c(10, 20, 40, 80), terroir = factor("Novo Mundo", levels(df$terroir))) |>
+  mutate(log_price = log(price))
+perfis |>
+  mutate(p = predict(fit_bin, perfis, type = "response"),
+         chance = p / (1 - p),
+         RR_vs_anterior = p / lag(p),
+         RC_vs_anterior = chance / lag(chance)) |>
+  mutate(across(where(is.numeric), \(v) round(v, 3)))
+```
+
+A RC entre linhas consecutivas é sempre $2^{\hat\beta}$; o RR encolhe à medida que $p$ cresce. É o [item 10 das frases equivocadas](#sec-frases).
+
+**5. O RR implicado pela RC** com a fórmula $RR=RC/(1-\pi_0+RC\,\pi_0)$:
+
+```{r}
+rr_de_rc <- function(rc, pi0) rc / (1 - pi0 + rc * pi0)
+pi0 <- predict(fit_bin, perfis[2, ], type = "response")   # US$ 20
+unname(rr_de_rc(2^b["log_price"], pi0))
+```
+
+**6. Interação preço × origem.** A RC do Velho Mundo passa a depender do preço:
+
+```{r}
+fit_int <- glm(points_bin ~ log_price * terroir, family = binomial, data = df)
+anova(fit_bin, fit_int, test = "LRT")
+bi <- coef(fit_int)
+rc_velho <- function(preco) exp(bi["terroirVelho Mundo"] + bi["log_price:terroirVelho Mundo"] * log(preco))
+tibble(preco = c(10, 20, 50, 100), RC_Velho_vs_Novo = rc_velho(preco))
+```

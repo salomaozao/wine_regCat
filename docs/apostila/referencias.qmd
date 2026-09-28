@@ -1,0 +1,24 @@
+# Referências {.unnumbered}
+
+**Material da disciplina** (Prof. Cristiano de Carvalho Santos, EST/UFMG, 2026/2)
+
+- *Modelos de Regressão para Dados Binários e Binomiais* (slide 1). `TP1/docs/slides/1_*.pdf`. Online: <https://www.est.ufmg.br/~cristianocs/EST171/Regressao_binarios.html>
+- *Modelos de Regressão para Dados Nominais e Ordinais* (slide 2). `TP1/docs/slides/2_*.pdf`
+- *Diagnóstico de Resíduos para Modelos de Regressão Binária e Ordinal* (slide 3). `TP1/docs/slides/3_*.pdf`
+- *Trabalho 1: Modelos de Regressão para dados binomiais, multinomiais e composicionais*. `TP1/docs/Trabalho1.pdf`
+- Testes 1 a 5 (fotos em `trabalhos/`) e simulado (`trabalhos/simulado_pg35_fim_slide2.md`)
+
+**Livros e artigos citados nos slides**
+
+- Agresti, A. (2013). *Categorical Data Analysis* (3ª ed.). Wiley.
+- Agresti, A. (2018). *An Introduction to Categorical Data Analysis* (3ª ed.). Wiley.
+- Liu, D. & Zhang, H. (2017). Residuals and diagnostics for ordinal regression models: a surrogate approach. *Journal of the American Statistical Association*. <https://doi.org/10.1080/01621459.2017.1292915>
+- Greenwell, B. M., McCarthy, A. J., Boehmke, B. C. & Liu, D. (2018). Residuals and diagnostics for binary and ordinal regression models: an introduction to the sure package. *The R Journal*, 10(1), 381–394.
+- Li, C. & Shepherd, B. E. (2012). A new residual for ordinal outcomes. *Biometrika*, 99(2), 473–480.
+- Brant, R. (1990). Assessing proportionality in the proportional odds model for ordinal logistic regression. *Biometrics*, 46(4), 1171–1178.
+- McCullagh, P. (1980). Regression models for ordinal data. *JRSS B*, 42(2), 109–142.
+
+**Projeto**
+
+- Dados: Wine Enthusiast Reviews (`TP1/data/winemagv2.csv`).
+- Plano e decisões do grupo: `TP1/brain/plano_implementacao.md`, `TP1/brain/decisoes/`, `TP1/brain/pendencias/`.

@@ -1,0 +1,97 @@
+# Apresentação {.unnumbered}
+
+Esta apostila reúne **todo o material da disciplina até 27/09/2026**:
+
+| Fonte | Conteúdo | Páginas |
+|---|---|---|
+| Slide 1 — *Modelos de Regressão para Dados Binários e Binomiais* | Ligações logit/probit/cloglog, variável latente, EMV, IC, testes, AIC, classificação, ROC/AUC, resíduos agrupados, interação, robit, skew-probit | 129 |
+| Slide 2 — *Modelos de Regressão para Dados Nominais e Ordinais* | Multinomial (logitos de referência), logitos acumulados, chances proporcionais, teste da suposição, ligações ordinais, categorias adjacentes, razão de continuação | 132 |
+| Slide 3 — *Diagnóstico de Resíduos para Modelos Binários e Ordinais* | Resíduos SBS e substitutos (*surrogate*), pacote `sure`, estudos de simulação | 56 |
+| Testes 1 a 5 (corrigidos) e simulado | Questões de prova e erros cometidos | — |
+| Enunciado do Trabalho 1 | Requisitos da apresentação | 1 |
+
+Cada capítulo resume a teoria na ordem dos slides e indica a página de origem (ex.: *S2 p. 87* = slide 2, página 87 do PDF).
+
+## Como ler as caixas {.unnumbered}
+
+::: callout-note
+## 🍷 No projeto: ★★★ Essencial
+Caixas em vinho ligam a seção ao **TP1 (qualidade de vinhos)**. Cada uma diz **por que** a seção importa e **como** aplicá-la no `wine.qmd`. As estrelas indicam a relevância:
+★★★ essencial (o trabalho exige), ★★ útil (fortalece a análise), ★ contexto (para entender ou responder perguntas da banca).
+:::
+
+::: callout-warning
+## ⚠️ Armadilha
+Erros que já apareceram nos testes corrigidos ou que são comuns na interpretação.
+:::
+
+::: callout-tip
+## 💻 No R
+Dicas de código e diferenças entre pacotes.
+:::
+
+## Seções "Em R com os vinhos" {.unnumbered}
+
+Os capítulos 1 a 10 terminam com uma seção **Em R com os vinhos**, que aplica o conteúdo do capítulo aos dados reais do TP1 (`winemagv2.csv`, N = 120.916). O código é executado ao renderizar, e as saídas que aparecem são as dos dados reais. Sempre que possível, o cálculo é feito **duas vezes**: pela fórmula da teoria ("na mão") e pela função pronta do pacote, para mostrar que coincidem.
+
+| Cap. | O que o código faz com os vinhos |
+|---|---|
+| [-@sec-binarios] | cria `points_bin`; ajusta logito, probito e cloglog; ativação e log-verossimilhança na mão; variável latente simulada |
+| [-@sec-interp] | RC, RC por duplicação, RC entre categorias com `vcov`, tabela de probabilidade/chance/RR, interação preço × origem |
+| [-@sec-inferencia] | Wald e IC na mão, perfil × Wald, TRV pela definição, tabela AIC/BIC, ligações por AIC, EMV por `optim` |
+| [-@sec-avaliacao] | matriz de confusão, NIR, ROC/AUC, corte de Youden, resíduos agrupados, teste de *spline* |
+| [-@sec-multinomial] | multinomial nas 5 classes, AIC contra o ordinal, probabilidades na mão |
+| [-@sec-pom] | seleção $m_0$–$m_3$, tabela de RC, sinais `polr` × `vglm`, probabilidades na mão, curvas por preço e origem, calibração |
+| [-@sec-cp] | Brant, colapsamentos com gráfico, falha do modelo não paralelo, ponto de cruzamento, PPOM(terroir) |
+| [-@sec-outros-ord] | quatro ligações no `polr`, acumulado × adjacentes × razão de continuação, leitura do `cratio` |
+| [-@sec-residuos] | painel `sure`, forma funcional, `gof` por ligação, interação, resíduo do binário |
+| [-@sec-bayes] | efeito do provador, incerteza de RR e RC por simulação |
+
+O código de preparação dos dados está em `R/prep_vinhos.R`; na primeira renderização ele salva `R/vinhos.rds` para acelerar as seguintes.
+
+## O que o Trabalho 1 exige e onde está na apostila {.unnumbered}
+
+O enunciado pede, em apresentação de 20 minutos, entregue em **30/09/2026**:
+
+| # | Exigência do enunciado | Capítulos |
+|---|---|---|
+| 1 | Análise descritiva rápida | [-@sec-projeto] |
+| 2 | Ajuste de modelos ordinais com **seleção de variáveis** e **interpretação** | [-@sec-pom], [-@sec-inferencia] |
+| 3 | **Verificar a suposição de chances proporcionais** e propor modelo melhor se falhar | [-@sec-cp], [-@sec-outros-ord] |
+| 4 | **Dicotomizar** a resposta, ajustar modelo binário e **comparar** | [-@sec-binarios], [-@sec-avaliacao], [-@sec-cp] (colapsamento) |
+| 5 | Tópico sobre **ganho da abordagem bayesiana** | [-@sec-bayes] |
+| 6 | **Frases equivocadas** sobre razão de chances e risco relativo | [-@sec-interp] |
+| 7 | Interpretação **oral**, sem texto nos slides | [-@sec-projeto] |
+
+Diagnóstico de resíduos ([-@sec-residuos]) não aparece no enunciado, mas foi o conteúdo mais recente da disciplina e dá sustentação à escolha do modelo.
+
+## Mapa de relevância {.unnumbered}
+
+| Cap. | Tema | Slides | Relevância para o TP1 |
+|---|---|---|---|
+| [-@sec-binarios] | Dados binários, funções de ligação, variável latente | S1 p. 1–31 | ★★★ |
+| [-@sec-interp] | Chance, razão de chances, risco relativo | S1 p. 19–26, 65–72, 99–122 | ★★★ |
+| [-@sec-inferencia] | EMV, IC, Wald, TRV, deviance, AIC | S1 p. 32–60, 73–78 | ★★★ |
+| [-@sec-avaliacao] | Acurácia, ROC/AUC, resíduos agrupados, interação | S1 p. 79–129 | ★★ |
+| [-@sec-multinomial] | Modelo multinomial nominal | S2 p. 4–49 | ★ |
+| [-@sec-pom] | Logitos acumulados e chances proporcionais | S2 p. 50–86 | ★★★ |
+| [-@sec-cp] | Teste da suposição e alternativas | S2 p. 87–98 | ★★★ |
+| [-@sec-outros-ord] | Outras ligações, categorias adjacentes, razão de continuação | S2 p. 99–132 | ★★ |
+| [-@sec-residuos] | Resíduos substitutos (`sure`) | S3 | ★★ |
+| [-@sec-bayes] | Abordagem bayesiana | S1 p. 49–53 (+ complemento) | ★★★ |
+| [-@sec-projeto] | Roteiro do TP1, com resultados de validação | — | ★★★ |
+| [-@sec-revisao] | Erros dos testes, formulário | Testes 1–5 | ★ (prova) |
+
+::: callout-important
+## Resultados de validação
+O [capítulo -@sec-projeto] traz números obtidos ao rodar o pipeline nos dados reais (`winemagv2.csv`, 27/09/2026). Dois deles **mudam o plano atual**: o modelo parcial (PPOM) com o preço não paralelo gera probabilidades negativas, e quem mais viola a suposição é o `terroir`, não o preço. Leia a [seção -@sec-achados] antes de montar os slides.
+:::
+
+## Para renderizar {.unnumbered}
+
+```bash
+cd apostila
+quarto render          # gera _book/index.html
+```
+
+Pacotes usados nos exemplos executados: `VGAM`, `MASS`, `brant`, `sure`, `pROC`, `ggplot2`, `dplyr`, `tidyr`. Os blocos que usam `ordinal`, `arm` ou `brms` (não instalados) aparecem com `eval: false`.

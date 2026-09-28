@@ -1,0 +1,249 @@
+# Diagnóstico por resíduos substitutos {#sec-residuos}
+
+```{r}
+#| include: false
+library(ggplot2)
+library(dplyr)
+library(MASS, exclude = "select")
+library(sure)
+theme_set(theme_minimal(base_size = 12))
+vinho <- c("#7A182F", "#B86B77", "#D9A5B3", "#4A0E17")
+```
+
+Base: Liu & Zhang (2017, *JASA*) e Greenwell, McCarthy, Boehmke & Liu (2018, *The R Journal*), apresentados no slide 3.
+
+## O problema (S3 p. 4, 12–13)
+
+Na regressão linear, $y-\hat y$ serve para detectar não linearidade e heterocedasticidade. Com respostas ordinais, "observado menos ajustado" não tem definição natural.
+
+**Resíduo SBS** (Li & Shepherd, 2012), ou resíduo na escala de probabilidade:
+
+$$
+r_{SBS}=E[\text{sign}(y-Y)]=P(y>Y)-P(y<Y).
+$$
+
+Ele é calculado a partir de um desfecho **discreto** e por isso também forma faixas, o que atrapalha a leitura dos gráficos. No estudo de caso 2 do slide 3, ele **não detecta** a heterocedasticidade que o resíduo substituto mostra.
+
+## Resíduo substituto (S3 p. 14–17)
+
+Pela representação latente, $Y^*=-f(\mathbf X,\boldsymbol\beta)+\epsilon$ discretizada pelos $\alpha_j$ (na convenção do slide 3). Dado $Y=y$, gera-se
+
+$$
+S\mid Y=y\ \sim\ \text{distribuição de }Y^*\text{ truncada em }(\alpha_{y-1},\alpha_y],
+$$
+
+e define-se
+
+$$
+R_S=S-E(S\mid\mathbf X).
+$$
+
+Como $S$ é **contínua**, $R_S$ também é. Se o modelo estiver correto:
+
+a. **simetria em torno de zero**: $E(R_S\mid\mathbf X)=0$;
+b. **homocedasticidade**: $\mathrm{Var}(R_S\mid\mathbf X)$ constante, sem depender de $\mathbf X$;
+c. **distribuição de referência conhecida**: $R_S$ segue a distribuição do erro latente (logística para logito, normal para probito), então um **gráfico QQ** contra essa distribuição testa a ligação.
+
+## Jittering e bootstrap (S3 p. 18–21)
+
+Alternativa ao truncamento:
+
+- escala da resposta: $S\mid Y=y\sim U(y,\,y+1)$;
+- escala da probabilidade: $S\mid Y=y\sim U\big(P(Y\le y-1),\,P(Y\le y)\big)$, que tem distribuição condicional conhecida ($U(0,1)$ sob o modelo correto).
+
+Como $S$ é sorteada, os gráficos têm ruído. Para estabilizar: **bootstrap** por observação (reamostra, reajusta, gera $R_S$), repetido `nsim` vezes.
+
+## O pacote `sure` (S3 p. 22–23)
+
+| Função | Faz |
+|---|---|
+| `resids()` | resíduos substitutos (`method = "latent"` ou `"jitter"`) |
+| `surrogate()` | só a resposta substituta $S$ |
+| `autoplot()` | gráficos `"qq"`, `"fitted"`, `"covariate"` |
+| `gof()` | valores-p simulados de KS, Anderson-Darling e Cramér-von Mises |
+
+Aceita `glm`, `polr`, `clm`, `lrm`/`orm` e `vglm`/`vgam`.
+
+::: callout-warning
+## ⚠️ Compatibilidade testada nesta máquina (27/09/2026)
+- `polr`: funciona. Chame `sure:::autoplot.polr(fit, ...)` como nos slides: o genérico `autoplot(fit)` falha com o `ggplot2` atual.
+- `glm` binário: exige `method = "jitter"` **e** resposta como `factor` (com 0/1 numérico dá erro de índice).
+- `vglm` (`cumulative`, `cratio`, inclusive o PPOM): **falha** com a versão instalada do VGAM (`dist.name` vazio: o `sure` espera nomes antigos de ligação). Faça os diagnósticos no `polr` equivalente.
+:::
+
+## Estudo de caso 1: termo quadrático omitido (S3 p. 24–32)
+
+O `df1` do `sure` foi gerado com $x$ e $x^2$ no preditor (probito). Ajustamos o modelo certo e o modelo sem o quadrático:
+
+```{r}
+#| label: fig-sure-quad
+#| fig-cap: "Resíduos substitutos contra x. Sem o termo quadrático, a curva suavizada revela a forma em U; com o modelo correto ela fica em torno de zero."
+data(df1, package = "sure")
+fit_certo  <- polr(y ~ x + I(x^2), data = df1, method = "probit")
+fit_errado <- polr(y ~ x,          data = df1, method = "probit")
+set.seed(101)
+bind_rows(
+  tibble(x = df1$x, r = as.numeric(resids(fit_errado)), modelo = "y ~ x"),
+  tibble(x = df1$x, r = as.numeric(resids(fit_certo)),  modelo = "y ~ x + x²")
+) |>
+  ggplot(aes(x, r)) +
+  geom_point(alpha = 0.25, colour = "grey40", size = 0.8) +
+  geom_smooth(colour = vinho[1], se = FALSE, method = "gam", formula = y ~ s(x, bs = "cs")) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~modelo) +
+  labs(y = "Resíduo substituto")
+```
+
+```{r}
+#| label: fig-sure-qq
+#| fig-cap: "Gráfico QQ dos resíduos substitutos do modelo correto contra a normal (ligação probito)."
+set.seed(102)
+sure:::autoplot.polr(fit_certo, what = "qq", nsim = 10)
+```
+
+## Os outros estudos de caso (S3 p. 33–52)
+
+| Caso | Problema simulado | Como o resíduo substituto detecta |
+|---|---|---|
+| 2 | Heterocedasticidade (variância cresce com $x$) | Gráfico contra $x$ em forma de funil; o SBS não mostra nada |
+| 3 | Ligação errada (verdadeira = log-log) | QQ curvo nas ligações erradas; `gof(..., test = "ad")` com valores-p uniformes só na log-log |
+| 4 | Chances proporcionais violadas | Ajustar modelos em dois grupos, gerar $S_1$ e $S_2$ e plotar $D=S_1-S_2$ contra $x$: sob a suposição, $D$ não depende de $x$ |
+| 5 | Interação omitida | Resposta substituta contra $x_1$ separada por grupo de $x_2$: tendências diferentes indicam interação |
+| Real | `wine` (Randall, 1989): temperatura e contato, 9 juízes | Com covariáveis categóricas, o `autoplot` usa boxplots em vez de dispersão |
+
+::: callout-tip
+## 💻 No R: os comandos do slide 3
+```r
+sure:::autoplot.polr(fit, what = "qq", nsim = 100)                         # ligação
+sure:::autoplot.polr(fit, what = "fitted", alpha = 0.5)                    # média e variância
+sure:::autoplot.polr(fit, what = "covariate", x = dados$x, xlab = "x")     # forma funcional
+plot(gof(fit, nsim = 100, test = "ad"))                        # EDF dos valores-p
+resids(fit, method = "jitter", jitter.scale = "probability")   # jittering
+```
+:::
+
+::: callout-note
+## 🍷 No projeto: ★★ Útil. Diagnóstico do modelo ordinal
+**Por quê.** Mostra que o modelo escolhido está adequado e dá argumentos visuais para as escolhas (log do preço, ligação, interação). Não é exigido pelo enunciado, mas é o conteúdo mais recente da disciplina.
+
+**Como aplicar.**
+
+1. **Subamostra estratificada** por classe (PEND-01 sugere $n$ de 5 a 10 mil) com `set.seed()`: `resids` e `gof` com `nsim = 100` em 121 mil linhas são lentos e produzem nuvens ilegíveis.
+2. Ajuste o **`polr`** na subamostra (o `sure` não funciona com o `vglm` instalado).
+3. Quatro gráficos, que podem formar um único slide 2×2:
+   - `what = "qq"`: a ligação logística serve?
+   - `what = "covariate", x = log_price`: há curvatura? (caso 1)
+   - `what = "covariate", x = terroir`: boxplots por origem (como no exemplo `wine`)
+   - `what = "fitted"`: variância constante? (caso 2)
+4. Para **comparar ligações**: `gof(..., test = "ad")` em `polr` logístico, probito, cloglog e loglog (caso 3).
+5. Para **interação preço × terroir**: caso 5, com `surrogate()` ajustado separadamente no Velho e no Novo Mundo.
+
+**Ressalva.** O resíduo substituto pressupõe um modelo de ligação acumulada com **uma** variável latente. Num PPOM não existe um único $Y^*$ (os cortes mudam com a covariável), então o diagnóstico vale para o modelo de chances proporcionais. É mais um argumento para apresentar o POM como base e o PPOM como correção pontual.
+:::
+
+
+## Em R com os vinhos {#sec-r-residuos}
+
+```{r}
+source("R/prep_vinhos.R")
+library(sure)
+set.seed(262)
+# Subamostra estratificada pela classe: ~5 mil vinhos
+df_sub  <- df |> group_by(points_ord) |> slice_sample(prop = 5000 / nrow(df)) |> ungroup()
+fit_sub <- polr(points_ord ~ log_price + terroir, data = df_sub, Hess = TRUE)
+nrow(df_sub)
+```
+
+**1. Os quatro gráficos de diagnóstico** (o painel para o slide de resíduos):
+
+```{r}
+#| label: fig-sure-vinhos
+#| fig-cap: "Resíduos substitutos do modelo de chances proporcionais (subamostra de ~5 mil vinhos): QQ contra a logística, contra os ajustados, contra log(preço) e por origem."
+#| fig-width: 10
+#| fig-height: 7
+set.seed(101)
+gridExtra::grid.arrange(
+  sure:::autoplot.polr(fit_sub, what = "qq", nsim = 10),
+  sure:::autoplot.polr(fit_sub, what = "fitted", nsim = 10, alpha = 0.2),
+  sure:::autoplot.polr(fit_sub, what = "covariate", x = df_sub$log_price, xlab = "log(preço)", nsim = 10, alpha = 0.2),
+  sure:::autoplot.polr(fit_sub, what = "covariate", x = df_sub$terroir, xlab = "Origem", nsim = 10),
+  ncol = 2
+)
+```
+
+**2. Os resíduos como vetor**, para fazer seus próprios gráficos ou testes:
+
+```{r}
+set.seed(102)
+r <- as.numeric(resids(fit_sub))
+c(media = mean(r), dp = sd(r), dp_logistica = pi / sqrt(3))   # sob o modelo: logística padrão
+```
+
+**3. A forma funcional do preço** (estudo de caso 1): comparar com uma *spline*.
+
+```{r}
+#| label: fig-sure-spline
+#| fig-cap: "Resíduos substitutos contra log(preço): modelo linear em log(preço) e com spline natural."
+fit_sub_spl <- polr(points_ord ~ splines::ns(log_price, 3) + terroir, data = df_sub, Hess = TRUE)
+set.seed(103)
+bind_rows(
+  tibble(x = df_sub$log_price, r = as.numeric(resids(fit_sub)),     modelo = "linear em log(preço)"),
+  tibble(x = df_sub$log_price, r = as.numeric(resids(fit_sub_spl)), modelo = "spline em log(preço)")
+) |>
+  ggplot(aes(x, r)) +
+  geom_point(alpha = 0.1, size = 0.6) +
+  geom_smooth(colour = vinho[1], se = FALSE, method = "gam", formula = y ~ s(x, bs = "cs")) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~modelo) +
+  labs(x = "log(preço)", y = "Resíduo substituto")
+```
+
+**4. Qual ligação?** (estudo de caso 3): valores-p simulados de Anderson-Darling. A ligação adequada tem valores-p próximos da uniforme (EDF perto da diagonal).
+
+```{r}
+#| label: fig-sure-gof
+#| fig-cap: "EDF dos valores-p simulados do teste de Anderson-Darling para quatro ligações."
+#| fig-width: 8
+#| fig-height: 6
+par(mfrow = c(2, 2), mar = c(4, 4, 2, 1))
+set.seed(104)
+for (m in c("logistic", "probit", "cloglog", "loglog")) {
+  f <- polr(points_ord ~ log_price + terroir, data = df_sub, method = m)
+  plot(gof(f, nsim = 30, test = "ad"), main = m)
+}
+```
+
+**5. Interação omitida** (estudo de caso 5): resposta substituta contra o log-preço, com modelos ajustados separadamente por origem. Inclinações diferentes sugerem interação.
+
+```{r}
+#| label: fig-sure-interacao
+#| fig-cap: "Resposta substituta contra log(preço), ajustando o modelo separadamente no Novo e no Velho Mundo."
+sub_nv <- filter(df_sub, terroir != "Outros") |> droplevels()
+fits_g <- lapply(split(sub_nv, sub_nv$terroir), \(d) polr(points_ord ~ log_price, data = d))
+set.seed(105)
+bind_rows(lapply(names(fits_g), \(g) tibble(
+  terroir = g, log_price = split(sub_nv, sub_nv$terroir)[[g]]$log_price,
+  s = as.numeric(surrogate(fits_g[[g]]))
+))) |>
+  ggplot(aes(log_price, s, colour = terroir)) +
+  geom_point(alpha = 0.08, size = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1.2) +
+  scale_colour_manual(values = vinho[c(3, 1)]) +
+  labs(x = "log(preço)", y = "Resposta substituta S", colour = NULL)
+```
+
+**6. Resíduos substitutos no modelo binário** (jittering; resposta como `factor`):
+
+```{r}
+#| label: fig-sure-binario
+#| fig-cap: "Resíduos substitutos (jittering na escala da probabilidade) do modelo binário contra log(preço)."
+fit_bin_sub <- glm(factor(points_bin) ~ log_price + terroir, family = binomial, data = df_sub)
+set.seed(106)
+tibble(x = df_sub$log_price,
+       r = as.numeric(resids(fit_bin_sub, method = "jitter", jitter.scale = "probability"))) |>
+  ggplot(aes(x, r)) +
+  geom_point(alpha = 0.1, size = 0.6) +
+  geom_smooth(colour = vinho[1], se = FALSE, method = "gam", formula = y ~ s(x, bs = "cs")) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  labs(x = "log(preço)", y = "Resíduo substituto (jitter)")
+```

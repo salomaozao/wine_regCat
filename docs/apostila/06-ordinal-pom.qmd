@@ -1,0 +1,272 @@
+# Respostas ordinais: logitos acumulados e chances proporcionais {#sec-pom}
+
+```{r}
+#| include: false
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(MASS, exclude = "select")
+library(VGAM)
+theme_set(theme_minimal(base_size = 12))
+vinho <- c("#D9A5B3", "#B86B77", "#7A182F", "#4A0E17")
+```
+
+## Por que um modelo próprio para ordinais (S2 p. 51)
+
+Modelos ordinais usam a ordem das categorias, e isso traz **parcimônia** (menos parâmetros que o multinomial) e **testes mais poderosos**.
+
+## Logitos acumulados (S2 p. 51–53)
+
+Com $Y\in\{1,\dots,J\}$ ordenada:
+
+$$
+\text{logit}\,P(Y\le j\mid\mathbf x)=\ln\frac{P(Y\le j\mid\mathbf x)}{P(Y>j\mid\mathbf x)}=\ln\frac{\pi_1+\dots+\pi_j}{\pi_{j+1}+\dots+\pi_J},\qquad j=1,\dots,J-1.
+$$
+
+Cada logito compara "até $j$" contra "acima de $j$" e usa **todas** as categorias. O modelo geral permite $\boldsymbol\beta_j$ diferente em cada logito.
+
+## Modelo de chances proporcionais (S2 p. 54–58)
+
+Supondo **o mesmo efeito em todos os logitos**:
+
+$$
+\text{logit}\,P(Y\le j\mid\mathbf x)=\alpha_j+\boldsymbol\beta^\top\mathbf x,\qquad j=1,\dots,J-1.
+$$
+
+- Cada logito tem seu intercepto, com $\alpha_1<\alpha_2<\dots<\alpha_{J-1}$ (porque $P(Y\le j)$ cresce com $j$).
+- O efeito $\boldsymbol\beta$ é único: são $J-1$ curvas **paralelas** na escala logito, deslocadas pelos $\alpha_j$.
+
+**Probabilidades:**
+
+$$
+P(Y\le j\mid\mathbf x)=\frac{e^{\alpha_j+\boldsymbol\beta^\top\mathbf x}}{1+e^{\alpha_j+\boldsymbol\beta^\top\mathbf x}},\qquad
+\pi_j(\mathbf x)=P(Y\le j\mid\mathbf x)-P(Y\le j-1\mid\mathbf x).
+$$
+
+**Verossimilhança (S2 p. 59–60):**
+
+$$
+L=\prod_{i=1}^n\prod_{j=1}^J\Big[P(Y_i\le j\mid\mathbf x_i)-P(Y_i\le j-1\mid\mathbf x_i)\Big]^{w_{ij}}.
+$$
+
+::: callout-warning
+## ⚠️ Armadilha (Teste 5, questão 2, nota 1)
+Pediu-se a expressão de $P(Y\le j\mid\mathbf x)$ a partir de $\text{logit}[P(Y\le j\mid\mathbf x)]=\alpha_j+\boldsymbol\beta^\top\mathbf x$. A resposta parou no $\eta$. Basta **inverter o logito**:
+$$P(Y\le j\mid\mathbf x)=\frac{\exp(\alpha_j+\boldsymbol\beta^\top\mathbf x)}{1+\exp(\alpha_j+\boldsymbol\beta^\top\mathbf x)}.$$
+:::
+
+## Razão de chances acumulada (S2 p. 61–62)
+
+Para $\mathbf x_1$ e $\mathbf x_2$:
+
+$$
+\frac{P(Y\le j\mid\mathbf x_1)/P(Y>j\mid\mathbf x_1)}{P(Y\le j\mid\mathbf x_2)/P(Y>j\mid\mathbf x_2)}=\exp\big[\boldsymbol\beta^\top(\mathbf x_1-\mathbf x_2)\big],
+$$
+
+**igual para todo $j$**. Daí o nome "chances proporcionais": uma única RC resume o efeito em qualquer corte.
+
+## Variável latente (S2 p. 63–66)
+
+Seja $Y^*=\boldsymbol\beta^\top\mathbf x+\epsilon$, com $\epsilon$ de FDA $G$, e pontos de corte $-\infty=\alpha_0<\alpha_1<\dots<\alpha_J=\infty$. Observa-se $Y=j$ quando $\alpha_{j-1}<Y^*\le\alpha_j$. Então
+
+$$
+P(Y\le j\mid\mathbf x)=P(Y^*\le\alpha_j)=G(\alpha_j-\boldsymbol\beta^\top\mathbf x)\ \Longrightarrow\ G^{-1}\big[P(Y\le j\mid\mathbf x)\big]=\alpha_j-\boldsymbol\beta^\top\mathbf x.
+$$
+
+- $G$ logística → logito acumulado; $G$ normal → probito acumulado.
+- Nesta forma, $\beta>0$ empurra $Y^*$ para cima, isto é, para **categorias mais altas**.
+
+```{r}
+#| label: fig-latente
+#| fig-cap: "Variável latente discretizada. A distribuição de Y* se desloca para a direita quando x aumenta; os cortes α_j fixos transformam o deslocamento em mais probabilidade nas categorias altas."
+cortes <- c(-1.5, 0, 1)
+tibble(y = seq(-6, 7, length.out = 500)) |>
+  mutate(`x = 0` = dlogis(y, 0), `x = 1` = dlogis(y, 1.5)) |>
+  pivot_longer(-y, names_to = "cov", values_to = "dens") |>
+  ggplot(aes(y, dens, fill = cov)) +
+  geom_area(alpha = 0.5, position = "identity", colour = NA) +
+  geom_vline(xintercept = cortes, linetype = 2) +
+  annotate("text", x = cortes, y = 0.27, label = paste0("α[", 1:3, "]"), parse = TRUE) +
+  annotate("text", x = c(-3.5, -0.75, 0.5, 3.5), y = 0.02, label = paste("Y =", 1:4)) +
+  scale_fill_manual(values = vinho[c(1, 3)]) +
+  labs(x = "Y* (latente)", y = "densidade", fill = NULL)
+```
+
+### Invariância aos pontos de corte (S2 p. 67–68) {#sec-invariancia}
+
+> "Os mesmos parâmetros ocorrem para os efeitos, independentemente de como os pontos de corte discretizam a variável latente."
+
+Se $Y^*$ segue uma regressão linear, o **mesmo $\boldsymbol\beta$** vale com 3 ou 5 categorias. Isso permite comparar estudos com escalas diferentes e, em particular, **o modelo binário (1 corte) com o ordinal (vários cortes)**.
+
+::: callout-note
+## 🍷 No projeto: ★★★ Essencial. A base teórica da comparação ordinal × binário
+A pontuação de 80 a 100 é a leitura discreta de uma qualidade latente. Discretizar em 5 quantis ou em "≥ 90" muda **só os cortes**. Pela invariância, o $\beta$ do preço deve ser **o mesmo** nos dois modelos, e o binário perde apenas precisão.
+
+Resultado validado (27/09): $\hat\beta_{\text{ordinal}}=2{,}151$ (EP 0,0105) e $\hat\beta_{\text{binário}}=2{,}178$. Coeficientes praticamente iguais, o que confirma a teoria. A comparação dos EPs mostra o custo de dicotomizar.
+:::
+
+## Convenções de sinal entre pacotes (S2 p. 74–78; S3 p. 7) {#sec-sinais}
+
+| Pacote | Modelo ajustado | Sinal de $\beta$ |
+|---|---|---|
+| `VGAM::vglm(family = cumulative())` | $\text{logit}P(Y\le j)=\alpha_j+\boldsymbol\beta^\top\mathbf x$ (Agresti) | $\beta<0$ → categorias altas |
+| `VGAM::vglm(family = cumulative(reverse = TRUE))` | $\text{logit}P(Y> j)=\alpha^*_j+\boldsymbol\beta^\top\mathbf x$ | $\beta>0$ → categorias altas |
+| `MASS::polr` | $\text{logit}P(Y\le j)=\alpha_j-\boldsymbol\beta^\top\mathbf x$ | $\beta>0$ → categorias altas |
+| `ordinal::clm` | $\text{logit}P(Y\le j)=\theta_j-\boldsymbol\beta^\top\mathbf x$ | $\beta>0$ → categorias altas |
+
+No exemplo de felicidade (S2 p. 75–76) o VGAM dá `trauma` $=-0{,}406$ e o `polr` dá $+0{,}406$: o mesmo modelo com sinais opostos. Como ali a categoria 1 é "muito feliz", $\beta_{\text{polr}}>0$ significa **menos** felicidade.
+
+```{r}
+set.seed(262)
+n <- 3000
+sim <- tibble(x = rnorm(n), g = factor(sample(c("A", "B"), n, TRUE))) |>
+  mutate(ystar = 1.0 * x + 0.5 * (g == "B") + rlogis(n),
+         y = cut(ystar, c(-Inf, -1, 0.5, 2, Inf), labels = 1:4, ordered_result = TRUE))
+
+fit_polr <- polr(y ~ x + g, data = sim, Hess = TRUE)
+fit_vglm <- vglm(y ~ x + g, family = cumulative(parallel = TRUE), data = sim)
+fit_rev  <- vglm(y ~ x + g, family = cumulative(parallel = TRUE, reverse = TRUE), data = sim)
+
+rbind(polr = coef(fit_polr),
+      `vglm (Agresti)` = coef(fit_vglm)[c("x", "gB")],
+      `vglm reverse` = coef(fit_rev)[c("x", "gB")]) |> round(3)
+```
+
+::: callout-tip
+## 💻 No R: recomendação para o projeto
+Use `polr` (ou `vglm(..., reverse = TRUE)`) para que **$\beta>0$ signifique nota mais alta**. Escolha uma convenção, declare-a na apresentação e mantenha-a nos modelos ordinal, binário e PPOM. Com ela, o $\beta$ do `glm` binário tem o mesmo sinal do ordinal.
+:::
+
+## Probabilidades ajustadas
+
+```{r}
+#| label: fig-probs
+#| fig-cap: "Probabilidades ajustadas por categoria em função de x (grupo A). As curvas acumuladas são paralelas na escala logito e geram probabilidades de categoria que se deslocam para cima."
+novo <- tibble(x = seq(-3, 3, length.out = 200), g = factor("A", levels = c("A", "B")))
+cbind(novo, predict(fit_polr, novo, type = "probs")) |>
+  pivot_longer(`1`:`4`, names_to = "Categoria", values_to = "p") |>
+  ggplot(aes(x, p, colour = Categoria)) +
+  geom_line(linewidth = 1) +
+  scale_colour_manual(values = vinho) +
+  labs(y = "P(Y = j | x)")
+```
+
+## Exemplo de felicidade (GSS 1984) (S2 p. 69–86)
+
+$n=97$ jovens de 18 a 22 anos. $Y$: 1 = muito feliz, 2 = razoavelmente feliz, 3 = não muito feliz. Covariáveis: `trauma` (número de eventos traumáticos) e `race`. VGAM:
+
+$$
+\text{logit}\,\hat P(Y\le j)=\hat\alpha_j-0{,}406\,\text{trauma}-2{,}036\,\text{race},\qquad \hat\alpha_1=-0{,}518,\ \hat\alpha_2=3{,}401.
+$$
+
+- Brancos (race = 0) com trauma médio (1,536): $\hat P(Y=1)=\text{logit}^{-1}(-0{,}518-0{,}406\cdot1{,}536)=0{,}24$.
+- Fixado o trauma, a chance de "muito feliz" (ou de estar abaixo de qualquer corte) para brancos é $e^{2{,}036}\approx7{,}7$ vezes a de negros. O IC por perfil é largo: só 13 das 97 observações são de pessoas negras (S2 p. 81).
+
+::: callout-note
+## 🍷 No projeto: ★★★ Essencial. O modelo principal
+**Especificação sugerida:** `polr(points_ord ~ log_price + terroir (+ variety_top), Hess = TRUE)`.
+
+**Interpretação a fazer oralmente sobre as tabelas:**
+
+1. **Preço:** $2^{\hat\beta}$ = RC por duplicação ("a chance de estar acima de qualquer faixa multiplica por ~4,4").
+2. **Terroir:** $e^{\hat\beta}$ = RC do Velho Mundo contra o Novo a preço fixo (validado: 1,30).
+3. **Interceptos $\hat\alpha_j$:** não se interpretam isoladamente; servem para calcular probabilidades. Mostre um gráfico como a @fig-probs com as 5 classes em função do preço, uma curva por origem.
+4. **Probabilidade de um perfil:** "um vinho do Novo Mundo de US\$ 30 tem X% de probabilidade de estar na classe 5".
+
+**Quantidade de categorias.** Com cortes por quantis de uma nota inteira (80 a 100), os empates deixam as classes desiguais. Na validação, a classe 3 é **só a nota 89** (11 mil vinhos), contra 20 a 32 mil nas outras. Isso é aceitável, mas precisa ser dito, porque "quintis" sugere classes iguais.
+:::
+
+
+## Em R com os vinhos {#sec-r-pom}
+
+```{r}
+source("R/prep_vinhos.R")
+```
+
+**1. A resposta ordinal: frequências e proporções acumuladas.** Os logitos acumulados empíricos são o ponto de partida dos $\alpha_j$:
+
+```{r}
+df |> count(points_ord) |>
+  mutate(prop = n / sum(n), acum = cumsum(prop), logit_acum = qlogis(acum))
+```
+
+**2. Seleção de variáveis no modelo ordinal.**
+
+```{r}
+m0 <- polr(points_ord ~ 1,                                 data = df, Hess = TRUE)
+m1 <- polr(points_ord ~ log_price,                         data = df, Hess = TRUE)
+m2 <- polr(points_ord ~ log_price + terroir,               data = df, Hess = TRUE)
+m3 <- polr(points_ord ~ log_price + terroir + variety_top, data = df, Hess = TRUE)
+anova(m0, m1, m2, m3)
+mods <- list(m0 = m0, m1 = m1, m2 = m2, m3 = m3)
+tibble(modelo = names(mods), gl = sapply(mods, \(m) attr(logLik(m), "df")),
+       AIC = sapply(mods, AIC), BIC = sapply(mods, BIC))
+```
+
+**3. O modelo ajustado: coeficientes, interceptos e razões de chances.**
+
+```{r}
+fit_pom <- m2
+summary(fit_pom)
+b  <- coef(fit_pom)
+ep <- sqrt(diag(vcov(fit_pom)))[names(b)]
+tibble(termo = names(b), beta = b, EP = ep,
+       RC = exp(b), RC_inf = exp(b - 1.96 * ep), RC_sup = exp(b + 1.96 * ep)) |>
+  mutate(across(where(is.numeric), \(v) round(v, 3)))
+c(RC_dobro_preco = unname(2^b["log_price"]))
+```
+
+**4. A convenção de sinal na prática.** Mesmo modelo em três parametrizações:
+
+```{r}
+fit_agresti <- vglm(points_ord ~ log_price + terroir, family = cumulative(parallel = TRUE), data = df)
+fit_reverse <- vglm(points_ord ~ log_price + terroir, family = cumulative(parallel = TRUE, reverse = TRUE), data = df)
+rbind(polr = b,
+      `vglm Agresti` = coef(fit_agresti)[names(b)],
+      `vglm reverse` = coef(fit_reverse)[names(b)]) |> round(4)
+rbind(`polr (zeta)` = fit_pom$zeta, `vglm Agresti` = coef(fit_agresti)[1:4]) |> round(4)
+```
+
+O `polr` e o `vglm` Agresti dão os mesmos interceptos e $\beta$ com sinal trocado; o `reverse = TRUE` mantém o sinal do `polr`.
+
+**5. Probabilidades "na mão"** com $P(Y\le j)=\text{logit}^{-1}(\zeta_j-\mathbf x^\top\boldsymbol\beta)$ (forma do `polr`):
+
+```{r}
+perfil <- data.frame(log_price = log(30), terroir = factor("Novo Mundo", levels(df$terroir)))
+xb     <- b["log_price"] * log(30)                      # Novo Mundo é a referência
+P_acum <- c(plogis(fit_pom$zeta - xb), 1)               # P(Y <= 1), ..., P(Y <= 5) = 1
+p_mao  <- diff(c(0, P_acum))                            # pi_j = P(Y <= j) - P(Y <= j - 1)
+rbind(mao = p_mao, predict = predict(fit_pom, perfil, type = "probs")) |> round(4)
+```
+
+**6. Curvas de probabilidade por preço e origem** (o gráfico para o slide de probabilidades):
+
+```{r}
+#| label: fig-probs-vinhos
+#| fig-cap: "Probabilidade de cada classe de nota em função do preço (escala log), por origem, no modelo de chances proporcionais."
+#| fig-width: 9
+grade <- expand_grid(price = exp(seq(log(5), log(500), length.out = 150)),
+                     terroir = levels(df$terroir)) |>
+  mutate(log_price = log(price), terroir = factor(terroir, levels(df$terroir)))
+bind_cols(grade, as_tibble(predict(fit_pom, grade, type = "probs"))) |>
+  pivot_longer(`1`:`5`, names_to = "Classe", values_to = "p") |>
+  ggplot(aes(price, p, colour = Classe)) +
+  geom_line(linewidth = 0.9) +
+  facet_wrap(~terroir) +
+  scale_x_log10(labels = scales::dollar) +
+  scale_colour_manual(values = paleta5) +
+  labs(x = "Preço (US$, escala log)", y = "P(Y = j)")
+```
+
+**7. Probabilidade de 90+ e comparação com o observado** por faixa de preço, uma checagem simples de calibração:
+
+```{r}
+p90 <- rowSums(predict(fit_pom, type = "probs")[, 4:5])
+df |> mutate(p90 = p90, faixa = cut(price, c(0, 10, 20, 30, 50, 100, Inf), dig.lab = 4)) |>
+  group_by(faixa) |>
+  summarise(n = n(), observado = mean(points_bin), previsto = mean(p90))
+```
+
+Nas faixas do meio o modelo acerta; nos extremos erra: até US\$ 10 prevê ~5% de 90+ contra 1,2% observado, e acima de US\$ 100 prevê 95% contra 89%. É o mesmo sinal de não linearidade no log-preço que os resíduos agrupados mostram na @sec-r-avaliacao.
+
+Pela mesma lógica da comparação de AIC, o multinomial da @sec-r-multinomial tem AIC menor que este modelo (321.464 contra 322.494): com N grande, os 9 parâmetros extras "pagam" o próprio custo. O argumento a favor do modelo ordinal é a interpretação (uma RC por covariável), não o AIC.

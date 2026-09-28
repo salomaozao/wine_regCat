@@ -1,0 +1,188 @@
+# Outras ligações e outros logitos ordinais {#sec-outros-ord}
+
+```{r}
+#| include: false
+library(VGAM)
+```
+
+## Modelos de ligação acumulada (CLM) (S2 p. 99–102)
+
+$$
+G^{-1}\big[P(Y\le j\mid\mathbf x)\big]=\alpha_j+\boldsymbol\beta^\top\mathbf x,
+$$
+
+em que $G$ é a FDA do erro latente e os $\alpha_j$ são os limiares na escala latente padronizada.
+
+| Ligação | $G^{-1}(u)$ | Quando usar |
+|---|---|---|
+| Logito | $\ln\frac{u}{1-u}$ | padrão; interpretação por RC |
+| Probito | $\Phi^{-1}(u)$ | erro latente normal; $\beta$ em desvios-padrão de $Y^*$ |
+| Complementar log-log | $\ln[-\ln(1-u)]$ | $P(Y\le j)$ se aproxima de **1 mais rápido** do que de 0 |
+| Log-log | $-\ln[-\ln(u)]$ | o caso oposto (cloglog com a ordem invertida) |
+
+A estimação é por máxima verossimilhança via *Fisher scoring*; a log-verossimilhança é **estritamente côncava** para logito, probito e cloglog, então o máximo é único e os algoritmos convergem com amostra suficiente (S2 p. 102).
+
+### Interpretação no probito (S2 p. 103–105)
+
+No exemplo da felicidade com probito: $\hat\beta_{\text{race}}=1{,}157$ (`polr`/`clm`) significa que, a trauma fixo, **a distribuição latente de felicidade dos brancos está 1,157 desvios-padrão acima** da dos negros. Não há leitura como razão de chances.
+
+::: callout-note
+## 🍷 No projeto: ★★ Útil. Qual ligação?
+Ajuste `polr(..., method = "logistic")`, `"probit"`, `"cloglog"` e `"loglog"` e compare os AICs numa tabela. É uma análise de sensibilidade barata.
+
+- A escolha deve considerar a interpretação: o logito entrega RC, e o enunciado pede frases sobre RC. Se outra ligação ganhar por pouco em AIC, mantenha o logito e mencione.
+- Se `cloglog` ou `loglog` ganharem com folga, a distribuição latente é assimétrica. Os resíduos substitutos ([capítulo -@sec-residuos], estudo de caso 3) confirmam visualmente.
+:::
+
+## Logitos de pares de categorias (S2 p. 111)
+
+Os logitos acumulados usam a escala toda em cada logito. As alternativas comparam **pares**:
+
+- **Categorias adjacentes:** cada categoria contra a seguinte.
+- **Razão de continuação:** cada categoria contra o conjunto das seguintes (ou das anteriores).
+
+## Logitos de categorias adjacentes (S2 p. 112–124)
+
+$$
+\ln\frac{\pi_{j+1}(\mathbf x)}{\pi_j(\mathbf x)}=\alpha_j+\boldsymbol\beta^\top\mathbf x,\qquad j=1,\dots,J-1
+$$
+
+(versão com chances proporcionais). O efeito de $x$ na chance de subir **um degrau** é igual em todos os degraus.
+
+**Propriedade distancial:** para categorias $a<b$,
+
+$$
+\ln\frac{\pi_b}{\pi_a}=\sum_{j=a}^{b-1}\ln\frac{\pi_{j+1}}{\pi_j}\quad\Longrightarrow\quad RC_{b\,vs\,a}=\exp\big[\beta\,(b-a)\big]\ \text{por unidade de } x.
+$$
+
+**Exemplo: partido e ideologia (GSS).** Ideologia de 1 (muito liberal) a 5 (muito conservador), covariável partido (0 = Democrata, 1 = Republicano):
+
+```{r}
+Y_party <- rbind(Democrata   = c(80, 81, 171, 41, 55),
+                 Republicano = c(30, 46, 148, 84, 99))
+dados_party <- data.frame(x_party = c(0, 1))
+fit_adj <- vglm(Y_party ~ x_party, family = acat(parallel = TRUE), data = dados_party)
+round(coef(summary(fit_adj)), 4)
+```
+
+- Degrau a degrau: $e^{0{,}435}=1{,}54$. A chance de um republicano estar na categoria $j+1$ em vez de $j$ é 1,54 vez a de um democrata.
+- Extremos (distância 4): $e^{0{,}435\cdot4}=1{,}54^4\approx5{,}7$.
+- TRV contra o modelo nulo: $56{,}8$ com 1 gl, evidência muito forte de associação.
+
+## Logitos de razão de continuação (S2 p. 125–132)
+
+Modelam escolhas **sequenciais**: para passar da etapa $j$, é preciso ter passado pelas anteriores. Na forma do `VGAM::cratio()`:
+
+$$
+\text{logit}\,P(Y>j\mid Y\ge j,\mathbf x)=\ln\frac{\pi_{j+1}+\dots+\pi_J}{\pi_j}=\alpha_j+\boldsymbol\beta_j^\top\mathbf x.
+$$
+
+Cada logito é uma regressão binária **condicional** a ter chegado até $j$. Com efeitos diferentes por etapa, as probabilidades continuam válidas, ao contrário dos acumulados.
+
+**Exemplo: toxicidade no desenvolvimento.** Fetos de camundongas expostas a cinco concentrações de um solvente; resultado: Óbito, Malformação, Normal.
+
+```{r}
+tox <- data.frame(conc    = c(0, 62.5, 125, 250, 500),
+                  nonlive = c(15, 17, 22, 38, 144),
+                  malform = c(1, 0, 7, 59, 132),
+                  normal  = c(281, 225, 283, 202, 9))
+fit_cr <- vglm(cbind(nonlive, malform, normal) ~ conc,
+               family = cratio(parallel = FALSE), data = tox)
+round(coef(summary(fit_cr)), 5)
+```
+
+- Logito 1: $\ln\frac{\pi_{\text{malf}}+\pi_{\text{normal}}}{\pi_{\text{óbito}}}=3{,}248-0{,}00639\,\text{conc}$. A cada +100 na concentração, a chance de **sobreviver** (contra óbito) é multiplicada por $e^{-0{,}639}=0{,}53$, isto é, **a chance de óbito aumenta**.
+- Logito 2 (entre vivos): $\ln\frac{\pi_{\text{normal}}}{\pi_{\text{malf}}}=5{,}702-0{,}01737\,\text{conc}$. Dado que o feto está vivo, +100 na concentração multiplica a chance de **malformação em vez de normal** por $e^{1{,}737}\approx5{,}7$ (S2 p. 132).
+
+::: callout-warning
+## ⚠️ Atenção ao simulado
+A questão 3c do simulado escreve $\log[\pi_1/(\pi_2+\pi_3)]=3{,}25-0{,}006x$ e conclui que a concentração **protege** contra o óbito. Isso inverte o logito do `cratio`: o ajuste modela sobrevivência contra óbito, então o sinal negativo significa **mais óbitos** com a concentração (144 óbitos em 500 contra 15 no controle). Veja a @sec-revisao.
+:::
+
+## Diferença conceitual (simulado, Q3d)
+
+- **Adjacentes:** $\pi_{j+1}$ contra $\pi_j$, comparação local entre vizinhos.
+- **Razão de continuação:** $\pi_j$ contra tudo o que vem depois (ou antes); descreve um processo em etapas.
+- **Acumulados:** "até $j$" contra "acima de $j$"; ligado a uma variável latente contínua.
+
+::: callout-note
+## 🍷 No projeto: ★★ Útil. A razão de continuação como "modelo mais adequado"
+**Por quê.** O enunciado pede "proponha um modelo mais adequado" se a suposição falhar. A lista dos slides (S2 p. 98) inclui usar um modelo em que efeitos não proporcionais sejam válidos, e a razão de continuação é o exemplo clássico.
+
+**Leitura para vinhos:** "dado que o vinho já chegou à faixa $j$, qual a chance de passar dela?". Faz sentido como uma escada de qualidade.
+
+**Resultado validado (27/09):** com `log_price` não paralelo, AIC 320.667 contra 322.494 do modelo de chances proporcionais. O efeito do preço **diminui** ao longo da escada (2,03 → 1,77 → 1,45 → 1,63): o preço ajuda mais a sair das notas baixas do que a subir entre as altas.
+
+**Custo:** a interpretação é condicional ("dado que passou de…"), mais difícil de narrar em 20 minutos. Sugestão: PPOM(terroir) como modelo principal e razão de continuação num slide de "modelo alternativo", com a tabela de AIC.
+
+**Adjacentes:** `acat()` com preço não paralelo deu AIC 322.275, quase igual ao modelo de chances proporcionais. Não vale o slide.
+:::
+
+
+## Em R com os vinhos {#sec-r-outros-ord}
+
+```{r}
+source("R/prep_vinhos.R")
+```
+
+**1. Sensibilidade à função de ligação** (`polr` aceita quatro):
+
+```{r}
+metodos <- c("logistic", "probit", "cloglog", "loglog")
+fits <- lapply(metodos, \(m) polr(points_ord ~ log_price + terroir, data = df, method = m, Hess = TRUE))
+tibble(ligacao = metodos,
+       AIC = sapply(fits, AIC),
+       beta_log_price = sapply(fits, \(f) coef(f)["log_price"])) |>
+  mutate(delta_AIC = AIC - min(AIC))
+```
+
+::: callout-note
+## 🍷 No projeto: ★★★ Achado. A ligação complementar log-log ganha com folga
+A cloglog tem AIC **1.452 menor** que a logística. É uma melhora maior que a do PPOM(terroir) (−855). A distribuição latente da qualidade é assimétrica. Como decidir:
+
+- **Manter o logito** como modelo principal, porque só ele dá RC, e o enunciado pede frases sobre RC. Mostrar a tabela de ligações como análise de sensibilidade: o sinal e a ordenação dos efeitos não mudam.
+- Ou adotar a cloglog e interpretar pelas **probabilidades ajustadas** (gráfico de curvas). O `gof()` dos resíduos substitutos (@sec-r-residuos) mostra a mesma coisa visualmente.
+:::
+
+No probito, $\hat\beta$ se lê em desvios-padrão da qualidade latente: dobrar o preço desloca a distribuição latente em $\hat\beta\ln 2$ desvios-padrão.
+
+```{r}
+unname(coef(fits[[2]])["log_price"] * log(2))
+```
+
+**2. Os três tipos de logito ordinal, lado a lado** (efeitos paralelos e não paralelos no preço):
+
+```{r}
+ajusta <- function(fam) vglm(points_ord ~ log_price + terroir, family = fam, data = df)
+modelos <- list(
+  `Acumulado (POM)`               = ajusta(cumulative(parallel = TRUE, reverse = TRUE)),
+  `Acumulado, terroir livre`      = ajusta(cumulative(parallel = FALSE ~ terroir, reverse = TRUE)),
+  `Adjacentes`                    = ajusta(acat(parallel = TRUE)),
+  `Adjacentes, preço livre`       = ajusta(acat(parallel = FALSE ~ log_price)),
+  `Razão de continuação`          = ajusta(cratio(parallel = TRUE)),
+  `Razão de continuação, preço livre` = ajusta(cratio(parallel = FALSE ~ log_price))
+)
+tibble(modelo = names(modelos),
+       parametros = sapply(modelos, \(m) length(coef(m))),
+       AIC = sapply(modelos, AIC)) |>
+  mutate(delta_AIC = AIC - min(AIC)) |>
+  arrange(AIC)
+```
+
+**3. Lendo a razão de continuação.** `cratio()` modela $\text{logit}\,P(Y>j\mid Y\ge j)$: "dado que chegou à classe $j$, passou dela?".
+
+```{r}
+fit_cr <- modelos[["Razão de continuação, preço livre"]]
+cf <- coef(fit_cr)
+tibble(etapa = paste0("passar da classe ", 1:4),
+       beta_log_price = cf[paste0("log_price:", 1:4)],
+       RC_dobro_preco = 2^beta_log_price)
+```
+
+**4. Probabilidades de cada modelo para um mesmo vinho.** Modelos diferentes, previsões parecidas:
+
+```{r}
+nd <- data.frame(log_price = log(30), terroir = factor("Velho Mundo", levels(df$terroir)))
+sapply(modelos, \(m) as.numeric(predict(m, nd, type = "response"))) |>
+  `rownames<-`(paste("Classe", 1:5)) |> round(3)
+```

@@ -1,0 +1,132 @@
+# A abordagem bayesiana {#sec-bayes}
+
+::: callout-important
+## Origem do conteúdo
+Os slides tocam no tema só pelo Stan: `rstan::optimizing()` para achar o EMV (S1 p. 49–54). Este capítulo é **complemento** para o tópico que o enunciado exige ("ganho que seria usar a abordagem bayesiana"). Revise com o grupo antes de apresentar.
+:::
+
+## A ideia em uma equação
+
+$$
+p(\boldsymbol\theta\mid\mathbf y)\ \propto\ L(\boldsymbol\theta;\mathbf y)\ \times\ p(\boldsymbol\theta).
+$$
+
+A verossimilhança é **a mesma** dos capítulos anteriores (Bernoulli, multinomial, logitos acumulados). Muda o que se faz com ela: em vez de maximizar, combina-se com uma **priori** $p(\boldsymbol\theta)$ e obtém-se a **distribuição a posteriori** inteira, geralmente por MCMC (Stan).
+
+Conexão com os slides: com priori plana, o **modo** da posteriori é o EMV. É o que o `optimizing()` calcula. A abordagem bayesiana completa **amostra** a posteriori em vez de só achar o pico.
+
+## Ganhos concretos (e quando eles aparecem)
+
+| Ganho | O que resolve | Relevância com $N\approx121$ mil |
+|---|---|---|
+| **Inferência sem aproximação assintótica** | Wald e o IC $\hat\beta\pm1{,}96\,EP$ dependem de $n$ grande; a posteriori vale para qualquer $n$ | Baixa: com 121 mil linhas o EMV já é quase normal |
+| **Regularização por priori** | Separação ou quase-separação (castas e países raros com todas as notas altas) gera $\hat\beta\to\pm\infty$ no EMV; uma priori $N(0,s^2)$ mantém a estimativa finita | **Média**: aparece se usar `variety` ou `country` sem agrupar |
+| **Modelos hierárquicos** | Efeitos aleatórios de vinícola, região, país e **provador** estimados com *partial pooling* | **Alta** (ver abaixo) |
+| **Incerteza de quantidades derivadas** | IC de probabilidades, de **RR**, de "P(nota ≥ 90) em US\$ 30" direto das amostras, sem método delta | **Alta**: resolve a discussão RC × RR com intervalos |
+| **Afirmações probabilísticas diretas** | "$P(\beta_{\text{Velho}}>0\mid\text{dados})=0{,}99$", em vez de um valor-p | Média: facilita a comunicação |
+| **Informação prévia** | Estudos anteriores sobre preço e nota entram na priori | Baixa: os dados dominam |
+
+## O argumento mais forte para os vinhos: o provador
+
+A base `winemagv2.csv` tem a coluna **`taster_name`**: 19 provadores identificados, e cerca de 24,5 mil avaliações sem provador. Provadores diferem em rigor (uns dão notas sistematicamente mais altas), e avaliações do mesmo provador **não são independentes**. Isso viola uma suposição de todos os modelos ajustados até aqui.
+
+O modelo hierárquico acomoda isso com um intercepto aleatório na escala latente:
+
+$$
+\text{logit}\,P(Y_i\le j)=\alpha_j-\big(\boldsymbol\beta^\top\mathbf x_i+u_{t[i]}\big),\qquad u_t\sim N(0,\sigma_u^2).
+$$
+
+Provadores com poucas avaliações "emprestam força" dos demais (*partial pooling*), e $\sigma_u$ mede quanto da variação da nota é do avaliador, não do vinho.
+
+```{r}
+#| eval: false
+library(brms)                                  # não instalado nesta máquina
+fit_bayes <- brm(
+  points_ord ~ log_price + terroir + (1 | taster_name),
+  family = cumulative(link = "logit"),
+  prior  = c(prior(normal(0, 2.5), class = "b"),
+             prior(exponential(1), class = "sd")),
+  data = df_sub,                               # subamostra: MCMC em 121 mil linhas é lento
+  chains = 4, cores = 4, seed = 262
+)
+summary(fit_bayes)
+# P(beta_VelhoMundo > 0 | dados)
+mean(as_draws_df(fit_bayes)$b_terroirVelhoMundo > 0)
+# RR com intervalo de credibilidade, direto das amostras da posteriori
+p30 <- posterior_epred(fit_bayes, newdata = data.frame(log_price = log(30), terroir = "Novo Mundo"), re_formula = NA)
+p60 <- posterior_epred(fit_bayes, newdata = data.frame(log_price = log(60), terroir = "Novo Mundo"), re_formula = NA)
+```
+
+::: callout-tip
+## 💻 No R: alternativa frequentista para o mesmo modelo
+`ordinal::clmm(points_ord ~ log_price + terroir + (1 | taster_name))` ajusta o modelo misto por máxima verossimilhança. Serve para mostrar que o efeito do provador existe; o ganho bayesiano está em propagar a incerteza para probabilidades e RR.
+:::
+
+::: callout-note
+## 🍷 No projeto: ★★★ Essencial. O que dizer no slide de conclusão
+O enunciado pede o **ganho** da abordagem bayesiana. Sugestão de três pontos, do mais ao menos específico aos vinhos:
+
+1. **Hierarquia do provador (e da vinícola/região):** as avaliações não são independentes; o modelo multinível bayesiano estima o efeito de cada provador com encolhimento e separa "vinho bom" de "provador generoso".
+2. **Incerteza em RR e probabilidades:** o RR (que o grupo contrasta com a RC) sai com intervalo de credibilidade direto das amostras.
+3. **Regularização:** permite usar `variety` e `country` desagregados sem estimativas infinitas nas categorias raras.
+
+**Seja honesto sobre o limite.** Com 121 mil observações e priori fraca, os $\hat\beta$ fixos seriam praticamente iguais aos do `polr`. O ganho **não** é "estimativas melhores do preço"; é estrutura (hierarquia) e comunicação (probabilidades com incerteza). Uma banca de Estatística valoriza essa ressalva.
+:::
+
+
+## Em R com os vinhos {#sec-r-bayes}
+
+O `brms` não está instalado, então esta seção mostra em R, **sem** MCMC, os dois argumentos do slide de conclusão: o efeito do provador existe e a incerteza do RR pode ser propagada por simulação.
+
+```{r}
+source("R/prep_vinhos.R")
+```
+
+**1. Quanto os provadores diferem?** Proporção de 90+ e nota média por provador:
+
+```{r}
+df |>
+  mutate(taster_name = coalesce(taster_name, "(sem provador)")) |>
+  group_by(taster_name) |>
+  summarise(n = n(), nota_media = mean(points), prop_90 = mean(points_bin), preco_mediano = median(price)) |>
+  arrange(desc(n))
+```
+
+**2. O provador explica nota além de preço e origem?** Provador como efeito fixo, só nas avaliações com provador identificado:
+
+```{r}
+df_t <- filter(df, !is.na(taster_name))
+fit_sem <- polr(points_ord ~ log_price + terroir, data = df_t, Hess = TRUE)
+fit_com <- polr(points_ord ~ log_price + terroir + taster_name, data = df_t, Hess = TRUE)
+anova(fit_sem, fit_com)
+c(AIC_sem = AIC(fit_sem), AIC_com = AIC(fit_com))
+rbind(sem_provador = coef(fit_sem)[1:3], com_provador = coef(fit_com)[1:3]) |> round(3)
+```
+
+O provador reduz a deviance em ~5.900 com 18 gl, mais que o terroir e a casta juntos. Mais importante: **o coeficiente do Velho Mundo quase triplica** (de 0,13 para 0,37) quando se controla pelo provador. Os provadores se especializam em regiões, então **o provador é um confundidor** do efeito da origem. É o argumento mais forte para o modelo hierárquico no slide de conclusão. A especialização aparece direto nos dados:
+
+```{r}
+df_t |> count(taster_name, country) |>
+  group_by(taster_name) |> mutate(prop = n / sum(n)) |>
+  slice_max(prop, n = 2) |>
+  filter(taster_name %in% c("Roger Voss", "Michael Schachner", "Virginie Boone", "Kerin O’Keefe"))
+```
+
+Michael Schachner (Espanha e Chile) dá as notas mais baixas da base (20% de 90+), enquanto Matt Kettmann e Virginie Boone, que avaliam só vinhos dos EUA, estão entre as mais altas (58% e 53%). Sem o provador no modelo, parte do "efeito da origem" é efeito de quem avaliou.
+
+O modelo hierárquico faz o mesmo tratando os provadores como amostra de uma população (efeito aleatório), com encolhimento para os que avaliaram pouco.
+
+**3. Incerteza do RR por simulação da distribuição assintótica** de $\hat{\boldsymbol\beta}$. É a versão frequentista do que a posteriori daria diretamente:
+
+```{r}
+fit_bin <- glm(points_bin ~ log_price + terroir, family = binomial, data = df)
+set.seed(262)
+B  <- MASS::mvrnorm(4000, coef(fit_bin), vcov(fit_bin))   # 4000 sorteios de beta
+x20 <- c(1, log(20), 0, 0); x40 <- c(1, log(40), 0, 0)   # Novo Mundo, US$ 20 e US$ 40
+p20 <- plogis(B %*% x20); p40 <- plogis(B %*% x40)
+RR <- p40 / p20
+RC <- (p40 / (1 - p40)) / (p20 / (1 - p20))
+rbind(RR = quantile(RR, c(0.025, 0.5, 0.975)), RC = quantile(RC, c(0.025, 0.5, 0.975))) |> round(3)
+```
+
+Com $N$ grande os intervalos são estreitos. O ganho bayesiano aparece de fato no modelo hierárquico (item 2) e em subgrupos pequenos, como países ou castas raras.

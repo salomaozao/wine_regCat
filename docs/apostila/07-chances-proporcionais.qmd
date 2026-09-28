@@ -1,0 +1,245 @@
+# Verificando a suposição de chances proporcionais {#sec-cp}
+
+```{r}
+#| include: false
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(MASS, exclude = "select")
+library(VGAM)
+theme_set(theme_minimal(base_size = 12))
+vinho <- c("#D9A5B3", "#B86B77", "#7A182F", "#4A0E17")
+```
+
+## O que a suposição diz (S2 p. 87–88)
+
+O modelo de chances proporcionais tem um $\boldsymbol\beta$ **comum** a todos os logitos. A generalização
+
+$$
+\text{logit}\,P(Y\le j\mid\mathbf x)=\alpha_j+\boldsymbol\beta_j^\top\mathbf x
+$$
+
+permite efeitos diferentes por corte. O preço dessa flexibilidade:
+
+- mais parâmetros: $(J-1)p$ em vez de $p$;
+- **as curvas deixam de ser paralelas e podem se cruzar** para alguns valores de $x$, e então $P(Y\le j)>P(Y\le j+1)$ gera probabilidades de categoria **negativas**;
+- mesmo com ajuste melhor na faixa observada, o modelo simples pode ser preferível por parcimônia.
+
+```{r}
+#| label: fig-paralelas
+#| fig-cap: "Logitos acumulados paralelos (chances proporcionais) e não paralelos. Na direita, as retas se cruzam perto de x = 3,3: a partir dali P(Y ≤ 2) < P(Y ≤ 1), o que é impossível."
+alpha <- c(-1, 0.5, 2)
+bind_rows(
+  expand.grid(x = seq(-4, 5, 0.1), j = 1:3) |>
+    mutate(logit = alpha[j] - 0.8 * x, painel = "Paralelas: β comum"),
+  expand.grid(x = seq(-4, 5, 0.1), j = 1:3) |>
+    mutate(logit = alpha[j] - c(0.4, 0.85, 1.3)[j] * x, painel = "Não paralelas: β_j")
+) |>
+  ggplot(aes(x, logit, colour = factor(j))) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~painel) +
+  scale_colour_manual(values = vinho[c(1, 2, 4)]) +
+  labs(y = "logit P(Y ≤ j | x)", colour = "corte j")
+```
+
+## Três formas de testar (S2 p. 89–92)
+
+$H_0$: os efeitos são iguais em todos os logitos (a suposição vale). **Valor-p grande** indica que a suposição não é rejeitada.
+
+1. **Teste de Brant** (`brant::brant(fit_polr)`): ajusta regressões logísticas separadas para cada colapsamento $Y\le j$ contra $Y>j$ e testa por Wald a igualdade dos $\boldsymbol\beta_j$. Dá um teste *omnibus* e um por covariável.
+2. **`ordinal::nominal_test(fit_clm)`**: para cada covariável, TRV entre o modelo com efeito comum e o modelo com efeito "nominal" (livre por corte).
+3. **TRV no VGAM**: `lrtest(fit_nonprop, fit_prop)` entre `cumulative(parallel = FALSE)` e `cumulative(parallel = TRUE)`.
+
+No exemplo da felicidade, os três aceitam a suposição (Brant e `nominal_test` com p > 0,26; `lrtest` com p = 0,49).
+
+```{r}
+# Simulação: x tem efeito proporcional, g NÃO (efeito maior nos cortes altos)
+set.seed(1)
+n <- 4000
+sim <- tibble(x = rnorm(n), g = factor(sample(c("A", "B"), n, TRUE)))
+eta <- with(sim, cbind(-1 - x - 0.2 * (g == "B"),
+                       0.5 - x - 0.8 * (g == "B"),
+                       2   - x - 1.5 * (g == "B")))      # logit P(Y <= j)
+pc <- plogis(eta)
+pr <- cbind(pc[, 1], pc[, 2] - pc[, 1], pc[, 3] - pc[, 2], 1 - pc[, 3])
+sim$y <- factor(apply(pr, 1, \(p) sample(1:4, 1, prob = p)), ordered = TRUE)
+
+fit_polr <- polr(y ~ x + g, data = sim, Hess = TRUE)
+brant::brant(fit_polr)
+```
+
+```{r}
+fit_prop    <- vglm(y ~ x + g, cumulative(parallel = TRUE,  reverse = TRUE), data = sim)
+fit_nonprop <- vglm(y ~ x + g, cumulative(parallel = FALSE, reverse = TRUE), data = sim)
+lrtest(fit_nonprop, fit_prop)
+```
+
+::: callout-tip
+## 💻 No R: `nominal_test`
+```r
+library(ordinal)                       # não instalado nesta máquina
+fit_clm <- clm(y ~ x + g, data = sim)
+nominal_test(fit_clm)                  # uma linha por covariável
+```
+:::
+
+## Nem todo valor-p pequeno condena o modelo (S2 p. 93–94)
+
+1. Com $n$ grande, diferenças **sem importância prática** entre os $\boldsymbol\beta_j$ ficam significativas.
+2. Mesmo que o modelo simples seja viesado, seus estimadores podem ter **menor erro quadrático médio** que os de um modelo com muitos parâmetros.
+
+> "Mesmo que um teste de chances proporcionais apresente um valor-p pequeno, não descarte esse modelo automaticamente."
+
+## Alternativa do colapsamento (S2 p. 95–96)
+
+Para saber se a violação é **substantivamente** importante, ajuste regressões logísticas separadas para cada colapsamento binário ($Y>j$ contra $Y\le j$) e compare os coeficientes. Se tiverem **mesma direção e magnitude parecida**, a estrutura de chances proporcionais é razoável.
+
+```{r}
+colapsos <- lapply(1:3, function(j) {
+  yb <- as.integer(as.integer(sim$y) > j)
+  coef(glm(yb ~ x + g, family = binomial, data = sim))[-1]
+})
+do.call(rbind, colapsos) |> `rownames<-`(paste("Y >", 1:3)) |> round(3)
+```
+
+O efeito de `x` fica estável; o de `gB` cresce a cada corte. O problema está em `g`.
+
+## Quando o modelo realmente falha: alternativas (S2 p. 97–98)
+
+1. Acrescentar termos ao preditor linear (**interações**, termos não lineares).
+2. Trocar a ligação por uma assimétrica (**complementar log-log**) ([capítulo -@sec-outros-ord]).
+3. Usar um **modelo ordinal em que efeitos não proporcionais sejam válidos** (categorias adjacentes, **razão de continuação**).
+4. Acrescentar parâmetros de dispersão.
+5. **Chances parcialmente proporcionais (PPOM):** efeitos separados por logito **só em alguns preditores**.
+6. Voltar ao multinomial (logitos de referência) e usar a ordem de modo informal.
+
+```{r}
+# PPOM: relaxa apenas g (a covariável que viola)
+fit_ppom <- vglm(y ~ x + g, cumulative(parallel = FALSE ~ g, reverse = TRUE), data = sim)
+round(coef(fit_ppom), 3)
+sapply(list(POM = fit_prop, PPOM = fit_ppom, `Não proporcional` = fit_nonprop), AIC) |> round(1)
+```
+
+::: callout-tip
+## 💻 No R: sintaxe do PPOM no VGAM
+`cumulative(parallel = FALSE ~ g)` libera **g** e mantém paralelo todo o resto. A forma equivalente `parallel = TRUE ~ x` prende **x** e libera o resto. No `ordinal`: `clm(y ~ x, nominal = ~ g)`.
+:::
+
+::: callout-note
+## 🍷 No projeto: ★★★ Essencial. Resultados da validação nos dados reais
+Rodado em 27/09/2026 com $N=120.916$, 5 classes por quantis, `log_price` e `terroir` (Novo/Velho/Outros).
+
+**1. Brant rejeita tudo, como previsto (H3):** omnibus $\chi^2=932$ (9 gl); `log_price` $\chi^2=168$; `terroir Velho Mundo` $\chi^2=583$; `terroir Outros` $\chi^2=173$. **Quem mais viola é o terroir, não o preço.**
+
+**2. O colapsamento mostra onde a violação importa:**
+
+| Colapsamento | $\hat\beta_{\log(\text{price})}$ | $\hat\beta_{\text{Velho Mundo}}$ | $\hat\beta_{\text{Outros}}$ |
+|---|---|---|---|
+| $Y>1$ | 2,082 | 0,501 | 0,482 |
+| $Y>2$ | 2,139 | 0,292 | 0,388 |
+| $Y>3$ (= 90+ pts) | 2,178 | 0,136 | −0,010 |
+| $Y>4$ | 2,357 | 0,039 | −0,594 |
+
+O preço é **estável** (2,08 a 2,36, variação de ~13%): pela regra dos slides, a violação dele é estatística, não substantiva. O prêmio do Velho Mundo **se desfaz nos cortes altos**: ajuda a sair das notas baixas, mas não a chegar às notas de elite. Isso vale um slide.
+
+**3. O PPOM do plano (preço não paralelo) é inválido:** `cumulative(parallel = FALSE ~ log_price)` estima inclinações diferentes para uma covariável contínua, as retas se cruzam (como na @fig-paralelas) e **47 vinhos com preço acima de ~US\$ 680 recebem probabilidade negativa**. A log-verossimilhança sai `NaN` e o AIC não existe. Os slides alertam exatamente para isso (S2 p. 88).
+
+**4. O PPOM que funciona relaxa o terroir:** `cumulative(parallel = FALSE ~ terroir, reverse = TRUE)` tem todas as probabilidades válidas, **AIC 321.638 contra 322.494** do modelo de chances proporcionais (−855) e TRV $=867$ com 6 gl. O preço fica em $2{,}163$, praticamente igual. Como o terroir é categórico, não há faixa de $x$ em que as curvas possam se cruzar fora do observado.
+
+**5. Alternativa ainda melhor em AIC: razão de continuação** ([capítulo -@sec-outros-ord]). `cratio(parallel = FALSE ~ log_price)` deu AIC 320.667, e mesmo com todos os efeitos paralelos `cratio` fica em 321.203. Nesse modelo, efeitos não paralelos nunca geram probabilidades inválidas (S2 p. 98, item 3).
+
+**Como levar para os slides:** (i) tabela do Brant; (ii) tabela de colapsamento acima; (iii) tabela de AIC com POM, PPOM(terroir) e, se couber, razão de continuação. A narrativa: "o teste rejeita porque N é enorme; o colapsamento mostra que o preço é estável e o terroir não; relaxamos só o terroir".
+:::
+
+
+## Em R com os vinhos {#sec-r-cp}
+
+```{r}
+source("R/prep_vinhos.R")
+fit_pom <- polr(points_ord ~ log_price + terroir, data = df, Hess = TRUE)
+```
+
+**1. Teste de Brant.**
+
+```{r}
+brant::brant(fit_pom)
+```
+
+**2. Colapsamentos binários** (S2 p. 95–96): um `glm` por corte, lado a lado.
+
+```{r}
+colapsos <- lapply(1:4, \(j) {
+  yb <- as.integer(as.integer(df$points_ord) > j)
+  g  <- glm(yb ~ log_price + terroir, family = binomial, data = df)
+  tibble(corte = paste0("Y > ", j), termo = names(coef(g))[-1],
+         beta = coef(g)[-1], EP = sqrt(diag(vcov(g)))[-1])
+}) |> bind_rows()
+colapsos |> select(-EP) |> pivot_wider(names_from = termo, values_from = beta) |>
+  mutate(across(where(is.numeric), \(v) round(v, 3)))
+```
+
+```{r}
+#| label: fig-colapsos
+#| fig-cap: "Coeficientes dos colapsamentos binários com IC 95%. A linha tracejada é a estimativa do modelo de chances proporcionais. O preço fica perto dela; o terroir, não."
+#| fig-width: 9
+ref <- tibble(termo = names(coef(fit_pom)), beta_pom = coef(fit_pom))
+colapsos |>
+  left_join(ref, by = "termo") |>
+  ggplot(aes(corte, beta)) +
+  geom_hline(aes(yintercept = beta_pom), linetype = 2, colour = "grey50") +
+  geom_pointrange(aes(ymin = beta - 1.96 * EP, ymax = beta + 1.96 * EP), colour = vinho[1]) +
+  facet_wrap(~termo, scales = "free_y") +
+  labs(x = NULL, y = expression(hat(beta)))
+```
+
+**3. O TRV do VGAM falha no modelo totalmente não paralelo.**
+
+```{r}
+fit_prop <- vglm(points_ord ~ log_price + terroir,
+                 family = cumulative(parallel = TRUE, reverse = TRUE), data = df)
+fit_np   <- vglm(points_ord ~ log_price + terroir,
+                 family = cumulative(parallel = FALSE, reverse = TRUE), data = df)
+c(logLik_prop = logLik(fit_prop), logLik_naoparalelo = logLik(fit_np))
+c(menor_prob_ajustada = min(fitted(fit_np)), n_probs_negativas = sum(fitted(fit_np) < 0))
+```
+
+A log-verossimilhança sai `NaN` porque algumas probabilidades ajustadas são negativas: as retas do preço se cruzam dentro da faixa observada.
+
+**4. Onde as retas do preço se cruzam** no PPOM que relaxa só o preço:
+
+```{r}
+fit_ppom_preco <- vglm(points_ord ~ log_price + terroir,
+                       family = cumulative(parallel = FALSE ~ log_price, reverse = TRUE), data = df)
+cf <- coef(fit_ppom_preco)
+a  <- cf[paste0("(Intercept):", 1:4)]
+bp <- cf[paste0("log_price:", 1:4)]
+cruza <- sapply(1:3, \(j) (a[j + 1] - a[j]) / (bp[j] - bp[j + 1]))
+tibble(cortes = paste(1:3, "e", 2:4), log_price = cruza, preco_US = exp(cruza))
+c(preco_maximo_na_base = max(df$price), n_probs_negativas = sum(fitted(fit_ppom_preco) < 0))
+```
+
+**5. O PPOM que funciona: relaxar o terroir.**
+
+```{r}
+fit_ppom <- vglm(points_ord ~ log_price + terroir,
+                 family = cumulative(parallel = FALSE ~ terroir, reverse = TRUE), data = df)
+min(fitted(fit_ppom))                   # todas as probabilidades válidas
+round(coef(fit_ppom), 3)
+lrtest(fit_ppom, fit_prop)
+c(AIC_POM = AIC(fit_prop), AIC_PPOM = AIC(fit_ppom))
+```
+
+**6. O efeito do Velho Mundo em cada corte** (o gráfico que conta a história do terroir):
+
+```{r}
+#| label: fig-ppom-terroir
+#| fig-cap: "PPOM: razão de chances do Velho Mundo (contra o Novo Mundo) para estar acima de cada corte, com IC 95%."
+cf  <- coef(fit_ppom); ep <- sqrt(diag(vcov(fit_ppom)))
+nms <- paste0("terroirVelho Mundo:", 1:4)
+tibble(corte = paste0("Y > ", 1:4), RC = exp(cf[nms]),
+       inf = exp(cf[nms] - 1.96 * ep[nms]), sup = exp(cf[nms] + 1.96 * ep[nms])) |>
+  ggplot(aes(corte, RC)) +
+  geom_hline(yintercept = 1, linetype = 2) +
+  geom_pointrange(aes(ymin = inf, ymax = sup), colour = vinho[1]) +
+  labs(x = NULL, y = "RC Velho Mundo vs Novo Mundo")
+```

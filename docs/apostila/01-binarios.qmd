@@ -1,0 +1,198 @@
+# Dados binários e funções de ligação {#sec-binarios}
+
+```{r}
+#| include: false
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+theme_set(theme_minimal(base_size = 12))
+vinho <- c("#7A182F", "#B86B77", "#D9A5B3", "#4A0E17")
+```
+
+## Da Bernoulli ao modelo de regressão (S1 p. 4–8)
+
+Sejam $Y_1,\dots,Y_n$ binárias independentes com $P(Y_i=1)=p$. A distribuição conjunta é
+
+$$
+P(Y_1=y_1,\dots,Y_n=y_n)=\prod_{i=1}^n p^{y_i}(1-p)^{1-y_i}=p^{\sum y_i}(1-p)^{\,n-\sum y_i}.
+$$
+
+Vista como função de $p$ com os dados fixos, ela é a **verossimilhança** $L(p)$, e
+
+$$
+\ln L(p)=\Big(\sum_{i} y_i\Big)\ln p+\Big(n-\sum_i y_i\Big)\ln(1-p).
+$$
+
+A pergunta dos slides (S1 p. 7) é se faz sentido um $p$ único para todos. Em regressão, cada unidade tem sua própria probabilidade, função das covariáveis:
+
+$$
+p_i = g(\eta_i),\qquad \eta_i=\mathbf x_i^\top\boldsymbol\beta=\beta_0+\beta_1x_{1i}+\dots
+$$
+
+- $g(\cdot)$ é a **função de ativação**: leva o preditor linear $\eta_i\in\mathbb R$ para $(0,1)$.
+- $g^{-1}(\cdot)$ é a **função de ligação**: leva a probabilidade de volta à escala do preditor linear.
+
+## Requisitos de $g$ (S1 p. 9)
+
+1. Domínio em toda a reta $(-\infty,+\infty)$, para não restringir as covariáveis.
+2. Imagem em $[0,1]$ (ou $(0,1)$), pois modela uma probabilidade.
+3. Estritamente crescente (monótona).
+4. Contínua, inversível e duas vezes diferenciável, para permitir máxima verossimilhança.
+
+**Qualquer função de distribuição acumulada (FDA) contínua** de uma variável na reta satisfaz esses requisitos. Por isso as três ligações clássicas são FDAs.
+
+::: callout-warning
+## ⚠️ Armadilha (Teste 1, item b)
+A pergunta era sobre a **função de ativação** $g$, e a resposta descreveu a ligação e o AIC. Resposta esperada: $g$ deve ir de $\mathbb R$ para $(0,1)$, ser monótona crescente, contínua e diferenciável, **e por isso usam-se FDAs** de distribuições contínuas.
+:::
+
+## As três ligações clássicas (S1 p. 13–17)
+
+| Nome | Distribuição do erro latente | Ativação $p=g(\eta)$ | Ligação $g^{-1}(p)=\eta$ |
+|---|---|---|---|
+| **Logito** | Logística padrão | $\dfrac{e^{\eta}}{1+e^{\eta}}$ | $\ln\dfrac{p}{1-p}$ |
+| **Probito** | Normal padrão | $\Phi(\eta)$ | $\Phi^{-1}(p)$ |
+| **Complementar log-log** | Valor extremo (Gumbel) | $1-e^{-e^{\eta}}$ | $\ln[-\ln(1-p)]$ |
+
+```{r}
+#| label: fig-ligacoes
+#| fig-cap: "Funções de ativação. Logito e probito são simétricas em torno de p = 0,5; a cloglog é assimétrica: sobe devagar a partir de 0 e se aproxima de 1 rapidamente."
+tibble(eta = seq(-5, 5, length.out = 400)) |>
+  mutate(Logito = plogis(eta),
+         Probito = pnorm(eta),
+         `Compl. log-log` = 1 - exp(-exp(eta))) |>
+  pivot_longer(-eta, names_to = "Ligação", values_to = "p") |>
+  ggplot(aes(eta, p, colour = `Ligação`)) +
+  geom_line(linewidth = 1) +
+  scale_colour_manual(values = vinho[c(1, 3, 4)]) +
+  labs(x = expression(eta), y = "p = g(η)")
+```
+
+As curvas logito e probito são quase idênticas depois de reescalar o eixo: $\beta_{\text{logit}}\approx 1{,}6$ a $1{,}8\times\beta_{\text{probit}}$. No exemplo simulado dos slides, $1{,}249/0{,}738\approx1{,}69$ (S1 p. 39–40). **Os coeficientes de ligações diferentes não são comparáveis diretamente**, só as probabilidades ajustadas.
+
+::: callout-warning
+## ⚠️ Armadilha (Teste 1, item c)
+As três ligações mais comuns são **logito, probito e complementar log-log**, e cada uma surge de uma distribuição do erro latente (logística, normal, Gumbel). "Log link" não é uma delas para dados binários.
+:::
+
+## Por que o logito é o mais usado (S1 p. 18–19)
+
+Porque seus coeficientes têm interpretação direta como **log da razão de chances**: $\ln\frac{p_i}{1-p_i}=\beta_0+\beta_1x_i$. O [capítulo -@sec-interp] desenvolve isso.
+
+## Formulação por variável latente (S1 p. 27–28) {#sec-latente-bin}
+
+Suponha uma variável contínua não observada
+
+$$
+Y_i^*=\mathbf x_i^\top\boldsymbol\beta-\epsilon_i,\qquad \epsilon_i\ \text{i.i.d. com FDA } F_\epsilon,
+$$
+
+e que observamos apenas se ela passou de um limiar: $Y_i=1$ se $Y_i^*>0$ e $Y_i=0$ caso contrário. Então
+
+$$
+p_i=P(Y_i^*>0)=P(\epsilon_i<\mathbf x_i^\top\boldsymbol\beta)=F_\epsilon(\mathbf x_i^\top\boldsymbol\beta).
+$$
+
+Erro logístico gera o logito; erro normal gera o probito; erro Gumbel gera a cloglog. **O modelo binário é um "termômetro" de uma escala contínua escondida, lida só como "acima ou abaixo do limiar".**
+
+::: callout-note
+## 🍷 No projeto: ★★★ Essencial. A variável latente justifica comparar o modelo binário com o ordinal
+**Por quê.** A nota do vinho é a leitura discreta de uma qualidade sensorial contínua $Y^*$. O modelo ordinal lê $Y^*$ com 4 limiares (5 classes) e o binário com 1 limiar (90 pontos). Se o erro latente for logístico nos dois casos, **os dois estimam o mesmo vetor $\boldsymbol\beta$** (ver invariância na [seção -@sec-invariancia]).
+
+**Como aplicar.**
+
+1. Na comparação ordinal × binário (enunciado, item 4), coloque lado a lado $\hat\beta_{\log(\text{price})}$ e o erro-padrão dos dois modelos. Espera-se **mesmo sinal e magnitude parecida**, e erro-padrão **maior** no binário (perdeu informação).
+2. Use a mesma ligação nos dois (logito), senão os $\beta$ ficam em escalas diferentes.
+3. Na validação de 27/09 saiu exatamente esse padrão: $2{,}151$ (EP 0,0105) no ordinal e $2{,}178$ (EP 0,0140) no binário com corte em 90. O EP do binário é 33% maior.
+:::
+
+## Dados binomiais (S1 p. 30–31)
+
+Quando a resposta é o número de sucessos $Y_i$ em $m_i$ ensaios com as mesmas covariáveis:
+
+$$
+P(Y_i=y_i)=\binom{m_i}{y_i}\,[g(\eta_i)]^{y_i}\,[1-g(\eta_i)]^{m_i-y_i},\qquad y_i=0,1,\dots,m_i,
+$$
+
+$$
+\ln L(\boldsymbol\beta)=\sum_{i=1}^n\ln\binom{m_i}{y_i}+\sum_{i=1}^n\Big[y_i\ln g(\eta_i)+(m_i-y_i)\ln\big(1-g(\eta_i)\big)\Big].
+$$
+
+O termo $\ln\binom{m_i}{y_i}$ não depende de $\boldsymbol\beta$ e não afeta a estimação.
+
+::: callout-warning
+## ⚠️ Armadilha (Teste 1, item d, nota 0)
+Pedia-se a log-verossimilhança com $g(\eta_i)=1-\exp\{-\exp(\eta_i)\}$ (cloglog, resposta Bernoulli). A resposta colocou $\binom{n}{m}p^m(1-p)^{n-m}$ **dentro** de $g$. O correto é substituir $p_i=g(\eta_i)$ na Bernoulli:
+
+$$
+\ln L(\boldsymbol\beta)=\sum_{i=1}^n\Big[y_i\ln\big(1-e^{-e^{\eta_i}}\big)+(1-y_i)\ln\big(e^{-e^{\eta_i}}\big)\Big]
+=\sum_{i=1}^n\Big[y_i\ln\big(1-e^{-e^{\eta_i}}\big)-(1-y_i)\,e^{\eta_i}\Big],
+$$
+
+com $\eta_i=\beta_0+\beta_1x_{1i}+\beta_2x_{2i}$.
+:::
+
+::: callout-note
+## 🍷 No projeto: ★ Contexto. Binário ou binomial?
+A base de vinhos é **binária** (uma linha por avaliação). Não agrupe em binomial: com preço contínuo quase não há linhas com as mesmas covariáveis. O agrupamento só faria sentido se todas as covariáveis fossem categóricas.
+:::
+
+## Em R com os vinhos {#sec-r-binarios}
+
+Toda seção "Em R com os vinhos" roda nos dados reais do TP1, com as definições do [capítulo -@sec-projeto]. A preparação fica em `apostila/R/prep_vinhos.R`.
+
+```{r}
+source("R/prep_vinhos.R")
+glimpse(df)
+```
+
+**1. Criar a resposta binária e olhar a prevalência.**
+
+```{r}
+df |> count(points_bin) |> mutate(prop = n / sum(n))
+```
+
+**2. Ajustar as três ligações.** O `glm` pede a família `binomial` e a ligação:
+
+```{r}
+fit_logit   <- glm(points_bin ~ log_price + terroir, family = binomial(link = "logit"),   data = df)
+fit_probit  <- glm(points_bin ~ log_price + terroir, family = binomial(link = "probit"),  data = df)
+fit_cloglog <- glm(points_bin ~ log_price + terroir, family = binomial(link = "cloglog"), data = df)
+
+sapply(list(logito = fit_logit, probito = fit_probit, cloglog = fit_cloglog), coef) |> round(3)
+```
+
+A razão logito/probito no preço fica perto de 1,7, como no exemplo simulado dos slides:
+
+```{r}
+coef(fit_logit)["log_price"] / coef(fit_probit)["log_price"]
+```
+
+**3. A ativação "na mão".** $\hat p_i=g(\mathbf x_i^\top\hat{\boldsymbol\beta})$ é exatamente o que `fitted()` devolve:
+
+```{r}
+X     <- model.matrix(fit_logit)
+p_mao <- plogis(X %*% coef(fit_logit))          # logito: g = FDA logística
+all.equal(as.numeric(p_mao), unname(fitted(fit_logit)))
+
+p_mao_cll <- 1 - exp(-exp(X %*% coef(fit_cloglog)))   # cloglog: g = FDA Gumbel
+all.equal(as.numeric(p_mao_cll), unname(fitted(fit_cloglog)))
+```
+
+**4. A log-verossimilhança pela fórmula** $\sum[y_i\ln p_i+(1-y_i)\ln(1-p_i)]$ confere com `logLik()`:
+
+```{r}
+y <- df$points_bin
+p <- fitted(fit_logit)
+c(formula = sum(y * log(p) + (1 - y) * log(1 - p)),
+  logLik  = as.numeric(logLik(fit_logit)))
+```
+
+**5. A variável latente por simulação.** Se $Y^*=\mathbf x^\top\boldsymbol\beta+\epsilon$ com $\epsilon$ logístico e $Y=1$ quando $Y^*>0$, simular $Y^*$ reproduz as probabilidades do modelo:
+
+```{r}
+set.seed(262)
+eta   <- as.numeric(X %*% coef(fit_logit))
+ystar <- eta + rlogis(length(eta))
+c(simulado = mean(ystar > 0), modelo = mean(fitted(fit_logit)), observado = mean(y))
+```

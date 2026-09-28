@@ -1,0 +1,215 @@
+# Avaliação do modelo binário {#sec-avaliacao}
+
+```{r}
+#| include: false
+library(ggplot2)
+library(dplyr)
+theme_set(theme_minimal(base_size = 12))
+vinho <- c("#7A182F", "#B86B77", "#D9A5B3", "#4A0E17")
+
+set.seed(123)
+n <- 2000
+x1 <- rnorm(n); x2 <- rnorm(n)
+y <- rbinom(n, 1, plogis(-1 + 1.2 * x1 + 0.8 * x2^2))   # verdadeiro tem termo quadrático
+sim <- data.frame(y, x1, x2)
+fit_errado <- glm(y ~ x1 + x2, family = binomial, data = sim)
+fit_certo  <- glm(y ~ x1 + I(x2^2), family = binomial, data = sim)
+```
+
+## Da probabilidade à classificação (S1 p. 79–81)
+
+Classifica-se como "sim" quando $\hat p_i\ge c$ (usualmente $c=0{,}5$). A **acurácia** é a proporção de acertos. Ela precisa superar duas referências:
+
+1. o chute aleatório (50%);
+2. a **classe majoritária** (*No Information Rate*, NIR): prever sempre a classe mais frequente. No exemplo Default, prever "Não" sempre já acerta 96,7%.
+
+## Matriz de confusão, sensibilidade e especificidade (S1 p. 82–84)
+
+|  | Real = 1 | Real = 0 |
+|---|---|---|
+| **Previsto = 1** | VP | FP |
+| **Previsto = 0** | FN | VN |
+
+- Acurácia $=(VP+VN)/N$
+- **Sensibilidade** (taxa de verdadeiros positivos) $=VP/(VP+FN)$
+- **Especificidade** (taxa de verdadeiros negativos) $=VN/(VN+FP)$
+
+A acurácia esconde erros por classe. No Default, a sensibilidade é só 0,32: o modelo erra 2 em cada 3 inadimplentes.
+
+## Curva ROC e AUC (S1 p. 86–88, 107)
+
+A curva ROC traça sensibilidade contra especificidade (ou 1 − especificidade) **para todos os pontos de corte**. A AUC resume a curva:
+
+- $AUC=1$: separação perfeita; $AUC=0{,}5$: sem poder discriminativo (diagonal); $AUC<0{,}5$: previsões invertidas.
+- Interpretação útil: a AUC é a **probabilidade de um positivo sorteado ter $\hat p$ maior que um negativo sorteado**.
+- A acurácia avalia um único corte; a AUC avalia todos.
+
+```{r}
+#| label: fig-roc
+#| fig-cap: "Curvas ROC: modelo com a forma funcional errada (linear em x2) contra o correto (quadrático)."
+library(pROC)
+roc_e <- roc(sim$y, fitted(fit_errado), quiet = TRUE)
+roc_c <- roc(sim$y, fitted(fit_certo),  quiet = TRUE)
+ggroc(list(`Linear em x2` = roc_e, `Quadrático em x2` = roc_c), linewidth = 1) +
+  geom_abline(intercept = 1, slope = 1, linetype = 2, colour = "grey60") +
+  scale_colour_manual(values = vinho[c(3, 1)]) +
+  labs(colour = NULL,
+       subtitle = sprintf("AUC: %.3f (linear) contra %.3f (quadrático)", auc(roc_e), auc(roc_c)))
+```
+
+::: callout-warning
+## ⚠️ Armadilha (Teste 2, item d)
+Resposta aceita, mas incompleta: a AUC maior indica **melhor discriminação em todos os cortes**, não apenas "menos falsos positivos e negativos" em um corte específico.
+:::
+
+## Resíduos agrupados (*binned residuals*) (S1 p. 91–94, 108–110) {#sec-binned}
+
+**Por que os resíduos comuns falham.** Com $y\in\{0,1\}$, o resíduo $y_i-\hat p_i$ só assume dois valores para cada $\hat p_i$, e o gráfico vira **duas faixas paralelas** que não mostram falta de ajuste. O resíduo de Pearson $(y_i-\hat p_i)/\sqrt{\hat p_i(1-\hat p_i)}$ tem o mesmo problema.
+
+**Construção.** Ordene as observações por $\hat p_i$ e divida em $K$ *bins* com $n_k$ observações:
+
+- abscissa: $\bar p_k=\frac1{n_k}\sum_{i\in k}\hat p_i$;
+- ordenada: $\bar r_k=\frac1{n_k}\sum_{i\in k}(y_i-\hat p_i)$;
+- bandas: $\pm2\sqrt{\bar p_k(1-\bar p_k)/n_k}$ (Teorema Central do Limite).
+
+**Leitura.** Com o modelo adequado, cerca de **95% dos pontos ficam dentro das bandas** e não há padrão sistemático. Pontos fora concentrados numa região indicam onde o modelo erra: no exemplo Pima, a incidência de diabetes era **superestimada** para $\hat p<0{,}1$ e IMC baixo. Também se faz o gráfico contra cada covariável.
+
+```{r}
+#| label: fig-binned
+#| fig-cap: "Resíduos agrupados contra x2. O modelo linear em x2 deixa um padrão em U (falta o termo quadrático); o modelo correto fica dentro das bandas."
+binned <- function(fit, x, nbins = 40) {
+  data.frame(x = x, r = fit$y - fitted(fit), p = fitted(fit)) |>
+    mutate(bin = ntile(x, nbins)) |>
+    group_by(bin) |>
+    summarise(xbar = mean(x), rbar = mean(r),
+              se = 2 * sqrt(mean(p) * (1 - mean(p)) / n()))
+}
+bind_rows(`Linear em x2` = binned(fit_errado, sim$x2),
+          `Quadrático em x2` = binned(fit_certo, sim$x2), .id = "modelo") |>
+  ggplot(aes(xbar, rbar)) +
+  geom_line(aes(y = se), colour = "grey60") +
+  geom_line(aes(y = -se), colour = "grey60") +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_point(colour = vinho[1]) +
+  facet_wrap(~modelo) +
+  labs(x = "x2 (média do bin)", y = "Resíduo médio")
+```
+
+::: callout-tip
+## 💻 No R
+`arm::binnedplot(fitted(fit), residuals(fit, type = "response"))` faz o gráfico em uma linha. O `arm` não está instalado nesta máquina, e por isso a função acima o reproduz manualmente com a mesma fórmula.
+:::
+
+::: callout-warning
+## ⚠️ Armadilha (Teste 2, itens b e c, notas 0 e 4)
+Pediu-se **como é calculado** o resíduo agrupado e **o que as curvas representam**. A resposta precisa ter: (i) agrupamento pelos valores ajustados; (ii) média dos resíduos brutos por grupo; (iii) as curvas cinzas são $\pm2$ EP, a região em que se esperam cerca de 95% dos pontos; (iv) conclusão sobre o ajuste (bom se quase todos os pontos estão dentro das bandas, sem padrão). "Não há formato de cone" não basta.
+:::
+
+## Ligações robustas e assimétricas (S1 p. 123–129)
+
+- **Robit:** ligação $t$-Student com $\nu$ graus de liberdade. Caudas pesadas diminuem a influência de *outliers*. Com $\nu\approx7$ ela se aproxima da logística; com $\nu\to\infty$, do probito. Pacote `heavy`.
+- **Skew-probit:** ligação normal assimétrica $\Phi(\eta;\alpha)=2\phi(\eta)\Phi(\alpha\eta)$, para quando a probabilidade cresce de forma assimétrica. Pacote `sn` com ligação construída à mão em `glm`.
+
+::: callout-note
+## 🍷 No projeto: ★★ Útil. Como avaliar o modelo dicotomizado
+**Por quê.** O enunciado pede para **comparar** o binário com o ordinal. Os coeficientes são uma parte da comparação; a outra é mostrar quanto o binário discrimina e onde erra.
+
+**Como aplicar.**
+
+1. **NIR**: a prevalência de 90+ é 37,5%, então prever sempre "< 90" acerta 62,5%. A acurácia do modelo precisa ser comparada com isso.
+2. **ROC/AUC** com `pROC::roc(df$points_bin, fitted(fit_bin))`. Validado (27/09, `log_price + terroir`): **AUC = 0,813**. O plano de implementação registrava 0,79; use o valor recalculado.
+3. **Corte ótimo** por Youden: `coords(roc_obj, "best")`. Com classes desbalanceadas, 0,5 é arbitrário. Validado: corte 0,345, sensibilidade 0,75, especificidade 0,72, acurácia 0,73 (contra 0,625 do NIR).
+4. **Resíduos agrupados contra `log_price`**: se aparecer curvatura, teste um termo quadrático ou *spline* (`splines::ns(log_price, 3)`) e leve a mesma especificação ao modelo ordinal.
+5. Com 121 mil linhas, use `nbins` de 50 a 100: as bandas ficam estreitas e qualquer desvio aparece. Interprete a **magnitude** do desvio, não só se passou da banda.
+
+**Para comparar com o ordinal:** o modelo ordinal também gera $\hat P(\text{nota}\ge90)$ (soma das classes 4 e 5), e dá para calcular a AUC dele para o mesmo evento. Validado: **0,8127 contra 0,8129** do binário. O ordinal discrimina o evento "90+" tão bem quanto o modelo feito só para ele **e** ainda descreve as outras faixas.
+:::
+
+
+## Em R com os vinhos {#sec-r-avaliacao}
+
+```{r}
+source("R/prep_vinhos.R")
+library(pROC)
+fit_bin <- glm(points_bin ~ log_price + terroir, family = binomial, data = df)
+p_hat <- fitted(fit_bin)
+y <- df$points_bin
+```
+
+**1. Matriz de confusão e métricas pela definição.**
+
+```{r}
+metricas <- function(y, p, corte) {
+  prev <- as.integer(p >= corte)
+  VP <- sum(prev == 1 & y == 1); VN <- sum(prev == 0 & y == 0)
+  FP <- sum(prev == 1 & y == 0); FN <- sum(prev == 0 & y == 1)
+  c(corte = corte, acuracia = (VP + VN) / length(y),
+    sensibilidade = VP / (VP + FN), especificidade = VN / (VN + FP))
+}
+table(Previsto = as.integer(p_hat >= 0.5), Real = y)
+rbind(metricas(y, p_hat, 0.5), metricas(y, p_hat, mean(y))) |> round(3)
+c(NIR = max(mean(y), 1 - mean(y)))
+```
+
+Compare as duas linhas: com o corte 0,5 a sensibilidade cai porque a prevalência é 37,5%. O corte padrão não é neutro quando as classes são desbalanceadas.
+
+**2. ROC, AUC e corte de Youden.**
+
+```{r}
+#| label: fig-roc-vinhos
+#| fig-cap: "Curva ROC do modelo binário (log_price + terroir) com o corte de Youden."
+roc_bin <- roc(y, p_hat, quiet = TRUE)
+auc(roc_bin)
+ci.auc(roc_bin)
+best <- coords(roc_bin, "best", ret = c("threshold", "sensitivity", "specificity", "accuracy"))
+best
+ggroc(roc_bin, colour = vinho[1], linewidth = 1) +
+  geom_abline(intercept = 1, slope = 1, linetype = 2, colour = "grey60") +
+  geom_point(data = best, aes(specificity, sensitivity), size = 3) +
+  labs(subtitle = sprintf("AUC = %.3f", auc(roc_bin)))
+```
+
+**3. Resíduos agrupados** contra os valores ajustados e contra `log_price`, com a mesma construção da @sec-binned:
+
+```{r}
+#| label: fig-binned-vinhos
+#| fig-cap: "Resíduos agrupados do modelo binário (100 bins). Pontos fora das bandas indicam onde o modelo erra sistematicamente."
+binned <- function(y, p, x, nbins = 100) {
+  tibble(x, r = y - p, p) |>
+    mutate(bin = ntile(x, nbins)) |>
+    group_by(bin) |>
+    summarise(xbar = mean(x), rbar = mean(r), se = 2 * sqrt(mean(p) * (1 - mean(p)) / n()))
+}
+plot_binned <- function(tab, xlab) {
+  ggplot(tab, aes(xbar, rbar)) +
+    geom_line(aes(y = se), colour = "grey60") + geom_line(aes(y = -se), colour = "grey60") +
+    geom_hline(yintercept = 0, linetype = 2) + geom_point(colour = vinho[1], size = 1) +
+    labs(x = xlab, y = "Resíduo médio")
+}
+patchwork::wrap_plots(
+  plot_binned(binned(y, p_hat, p_hat), "Valor ajustado (média do bin)"),
+  plot_binned(binned(y, p_hat, df$log_price), "log(preço) (média do bin)")
+)
+```
+
+Proporção de bins fora das bandas (esperado: cerca de 5%):
+
+```{r}
+tab <- binned(y, p_hat, df$log_price)
+mean(abs(tab$rbar) > tab$se)
+```
+
+**4. Testar a forma funcional sugerida pelo gráfico.** Uma *spline* natural no log-preço entra pelo TRV?
+
+```{r}
+fit_spl <- glm(points_bin ~ splines::ns(log_price, 3) + terroir, family = binomial, data = df)
+anova(fit_bin, fit_spl, test = "LRT")
+c(AIC_linear = AIC(fit_bin), AIC_spline = AIC(fit_spl))
+tab_spl <- binned(y, fitted(fit_spl), df$log_price)
+c(fora_linear = mean(abs(tab$rbar) > tab$se), fora_spline = mean(abs(tab_spl$rbar) > tab_spl$se))
+```
+
+::: callout-note
+## 🍷 No projeto: ★★★ Achado. O efeito do log-preço não é linear
+Com o preço linear, **metade dos bins** fica fora das bandas (o esperado é ~5%). A *spline* reduz isso para 12% e o AIC cai ~1.070. Na prática, o modelo linear **superestima** a chance de 90+ nos vinhos muito baratos e subestima nos caros (veja também a calibração na @sec-r-pom). Duas saídas: (i) manter `log_price` linear pela interpretabilidade da RC e **declarar** a limitação; (ii) usar `ns(log_price, 3)` e apresentar o efeito do preço em **gráfico de probabilidades** em vez de uma RC única.
+:::

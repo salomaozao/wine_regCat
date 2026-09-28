@@ -21,3 +21,10 @@ Rplots.pdf
 .vdoc*
 *.vdoc*
 R/.vdoc*
+
+# Caches e artefatos de renderização Quarto / knitr
+*_cache/
+*_files/
+.quarto/
+_freeze/
+_book/

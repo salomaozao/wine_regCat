@@ -1,0 +1,57 @@
+project:
+  type: book
+  output-dir: _book
+
+lang: pt
+
+book:
+  title: "Regressão para Dados Categóricos e Ordinais"
+  subtitle: "Apostila de estudo com foco no Trabalho Prático 1 (vinhos)"
+  author: "Gabriel Nascimento"
+  date: "2026-09-27"
+  date-format: "DD/MM/YYYY"
+  description: "Síntese dos slides do Prof. Cristiano de Carvalho Santos (EST/UFMG), dos testes e do simulado, com destaque para o que serve ao TP1."
+  chapters:
+    - index.qmd
+    - part: "Parte I — Respostas binárias"
+      chapters:
+        - 01-binarios.qmd
+        - 02-interpretacao.qmd
+        - 03-inferencia.qmd
+        - 04-avaliacao-binaria.qmd
+    - part: "Parte II — Respostas nominais e ordinais"
+      chapters:
+        - 05-multinomial.qmd
+        - 06-ordinal-pom.qmd
+        - 07-chances-proporcionais.qmd
+        - 08-outros-ordinais.qmd
+    - part: "Parte III — Diagnóstico e extensões"
+      chapters:
+        - 09-residuos.qmd
+        - 10-bayes.qmd
+    - part: "Parte IV — Aplicação"
+      chapters:
+        - 11-projeto.qmd
+        - 12-revisao.qmd
+    - referencias.qmd
+
+format:
+  html:
+    theme:
+      light: [cosmo, estilo.scss]
+      dark: [darkly, estilo.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
+    code-tools: false
+    code-copy: true
+    fig-align: center
+    fig-width: 7
+    fig-height: 4
+    df-print: kable
+
+execute:
+  freeze: auto
+  warning: false
+  message: false
