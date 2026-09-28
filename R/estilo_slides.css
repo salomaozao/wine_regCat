@@ -1,0 +1,159 @@
+/* Estilo Institucional UFMG - Wine Theme para Reveal.js */
+
+:root {
+    --r-background-color: #FDFBFB;
+    --r-main-font: "Segoe UI", -apple-system, BlinkMacSystemFont, "Roboto", sans-serif;
+    --r-heading-font: "Segoe UI", -apple-system, BlinkMacSystemFont, "Roboto", sans-serif;
+    --r-heading-color: #7A182F;
+    --r-main-color: #2C1820;
+    --r-link-color: #9E3D52;
+    --r-selection-background-color: #D9A5B3;
+}
+
+.reveal {
+    font-size: 26px;
+    color: #2C1820;
+}
+
+.reveal h1, .reveal h2, .reveal h3 {
+    color: #7A182F;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+
+.reveal h2 {
+    font-size: 1.45em;
+    border-bottom: 2px solid #E0B0BA;
+    padding-bottom: 8px;
+    margin-bottom: 18px;
+}
+
+.reveal h3 {
+    font-size: 1.15em;
+    color: #9E3D52;
+}
+
+/* Header superior institucional */
+.reveal .header-inst {
+    font-size: 0.55em;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #8C6B75;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+/* Tabelas elegantes e nítidas */
+.reveal table {
+    font-size: 0.78em;
+    border-collapse: collapse;
+    margin: 10px auto;
+    width: 95%;
+}
+
+.reveal th {
+    background-color: #7A182F;
+    color: #FFFFFF !important;
+    font-weight: 600;
+    padding: 8px 12px;
+    border: 1px solid #7A182F;
+    text-align: center;
+}
+
+.reveal td {
+    padding: 7px 12px;
+    border: 1px solid #E5D5D8;
+    background-color: #FFFFFF;
+    text-align: center;
+}
+
+.reveal tr:nth-child(even) td {
+    background-color: #F9F2F4;
+}
+
+/* Destaques numéricos e cards */
+.card-kpi {
+    background: #FFFFFF;
+    border: 1px solid #E5D5D8;
+    border-left: 4px solid #7A182F;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 5px rgba(122, 24, 47, 0.05);
+}
+
+.kpi-title {
+    font-size: 0.7em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #8C6B75;
+    font-weight: 600;
+}
+
+.kpi-value {
+    font-size: 1.5em;
+    font-weight: 700;
+    color: #7A182F;
+    margin: 2px 0;
+}
+
+.kpi-desc {
+    font-size: 0.75em;
+    color: #555555;
+}
+
+/* Box de equações centrais */
+.formula-box {
+    background: #FFFFFF;
+    border: 1px solid #D9A5B3;
+    border-radius: 8px;
+    padding: 16px 24px;
+    margin: 15px 0;
+    box-shadow: 0 3px 8px rgba(122, 24, 47, 0.06);
+    text-align: center;
+}
+
+/* Badges de destaque */
+.badge-vinho {
+    background-color: #7A182F;
+    color: #FFFFFF;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.75em;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.badge-sucesso {
+    background-color: #2E7D32;
+    color: #FFFFFF;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.75em;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.badge-alerta {
+    background-color: #C62828;
+    color: #FFFFFF;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.75em;
+    font-weight: 600;
+    display: inline-block;
+}
+
+/* Ajuste de imagens */
+.reveal img {
+    border-radius: 4px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+}
+
+/* Slide numbers */
+.reveal .slide-number {
+    color: #7A182F !important;
+    font-size: 0.55em !important;
+    font-weight: 600 !important;
+    background: transparent !important;
+}

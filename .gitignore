@@ -28,3 +28,4 @@ R/.vdoc*
 .quarto/
 _freeze/
 _book/
+*.rmarkdown
