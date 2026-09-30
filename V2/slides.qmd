@@ -700,7 +700,7 @@ tibble(
     row_spec(3, bold = TRUE)
 ```
 
-\tiny Preço livre: as curvas acumuladas se cruzam e $\hat P(Y = j) < 0$ torna a verossimilhança indefinida. No parcial, $\hat\beta_1 =$ `r num(coef(fit_ppom)["log_price"], 3)` (comum aos cortes).
+\tiny No parcial,$\hat\beta_1 =$ `r num(coef(fit_ppom)["log_price"], 3)` (comum aos cortes).
 
 ```{r tab-ppom-coef}
 cf <- coef(fit_ppom)

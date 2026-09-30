@@ -6,6 +6,18 @@
 
 > **Diretriz do Enunciado**: Os slides da apresentação oficial são estritamente visuais e quantitativos (contendo exclusivamente fórmulas, gráficos e tabelas). **Nenhum texto descritivo de resultado deve aparecer nos slides**. Toda a interpretação substantiva, contextualização metodológica e respostas a arguições devem ser apresentadas **oralmente** a partir deste caderno de notas secundário.
 
+> **Checklist do enunciado** (`TP1/docs/Trabalho1.pdf`) e onde cada item está no deck:
+> 1. Análise descritiva rápida: Slides 3 a 9.
+> 2. Modelos ordinais com seleção de variáveis e interpretação: Slides 10 a 15.
+> 3. Verificar a suposição de chances proporcionais e propor modelo melhor se falhar: Slides 16 a 19.
+> 4. Dicotomizar, ajustar modelo binário e comparar: Slides 20 a 22.
+> 5. **Tópico na conclusão sobre o ganho da abordagem bayesiana: Slide 30 (obrigatório, não pode sair).**
+> 6. Frases equivocadas sobre razão de chances e risco relativo: Slide 29.
+>
+> O diagnóstico de resíduos (Slides 23 a 25) **não** é exigido pelo enunciado. Se faltar tempo, é o primeiro candidato a ser cortado.
+>
+> **Atenção:** o enunciado diz que *"a ordem de apresentação dos integrantes será definida pelo professor"*. A divisão abaixo é só uma sugestão, e todos precisam conseguir apresentar qualquer bloco.
+
 ---
 
 ## Divisão Sugerida de Apresentação (20 Minutos / ~6–7 min por integrante)
@@ -167,7 +179,8 @@
 * **O que falar sobre cada painel** (amostra aleatória de 5.000 vinhos):
   1. **QQ**: "Os pontos seguem a reta teórica logística, então a ligação logito é adequada."
   2. **Resíduo × ajustado**: "Nuvem centrada em zero, sem funil. A curva vermelha só cai um pouco à direita, nos vinhos de preditor alto, onde há poucos dados."
-  3. **Resíduo × log(preço)**: "Mesmo padrão: plana em quase todo o intervalo, com leve queda nos vinhos mais caros. É coerente com o que vimos nos colapsos, em que o efeito do preço cresce no topo, mas não pede um termo quadrático."
+  3. **Resíduo × log(preço)**: "Mesmo padrão: plana em quase todo o intervalo, com leve queda nos vinhos mais caros. Ali há poucos dados, mas isso pode indicar que o efeito do log-preço não é exatamente linear nos extremos, o que é coerente com os colapsos, em que o efeito do preço cresce no topo. Um termo mais flexível, como um spline, permitiria investigar."
+     * **Se a banca perguntar sobre a linearidade do preço**: "Em uma análise exploratória anterior, com resíduos agrupados, o log-preço linear deixou cerca de 50% dos grupos fora das bandas de confiança, contra cerca de 12% com um spline. Então existe algum desvio da linearidade, concentrado nos extremos de preço. Mantivemos o termo linear porque ele dá um único coeficiente interpretável (dobrar o preço multiplica a chance por 4,54), e o sinal e a ordem de grandeza do efeito não mudam. Um spline melhoraria o ajuste nos extremos, ao custo de interpretar o efeito por faixa de preço." (Números da apostila, `docs/apostila/11-projeto.qmd`, calculados com as classes antigas; não recalculados para o $m_3$.)
   4. **Resíduo × região e × uva**: "Caixas centradas em zero e com dispersão parecida: não sobra efeito médio de região nem de uva."
 
 ### Slide 25: Resíduos Substitutos: Binário
@@ -203,11 +216,14 @@
     4. Tratar a escala ordinal como quantitativa ("o vinho fica 4,5 vezes melhor").
 
 ### Slide 30: Abordagem Bayesiana
+* **Por que este slide existe**: o enunciado exige *"um tópico na conclusão sobre o ganho que seria usar a abordagem bayesiana"*. Não pode ser cortado.
+* **Estratégia**: não listar vantagens genéricas. Ligar cada ganho a um problema que apareceu no nosso próprio trabalho.
 * **O que falar**:
-  * "Como extensões futuras apontadas na literatura recente, a inferência Bayesiana oferece três grandes vantagens práticas:"
-    1. *Prioris regularizadoras* (como Ridge/Normal) para uvas raras e pequenos produtores, prevenindo separação quase-completa via *shrinkage*.
-    2. *Modelos hierárquicos com efeitos aleatórios* para modelar os avaliadores individuais (`taster_name`), isolando o rigor ou generosidade do crítico.
-    3. Obtenção direta da distribuição posterior exata de quantidades não-lineares, como o Risco Relativo e probabilidades preditas por MCMC, sem depender de aproximações de primeira ordem (método Delta).
+  * "Fechamos com três ganhos que a abordagem bayesiana traria, cada um ligado a um problema que encontramos."
+    1. **Priori regularizadora, contra grupos pequenos e instáveis.** "O grupo 'Outros países' tem 30 países em só 2% da amostra, e o coeficiente dele troca de sinal entre os cortes (Slide 18). Uma priori $\mathcal N(0, \sigma^2)$ puxa estimativas de grupos com poucos dados em direção a zero (*shrinkage*). Com isso, poderíamos até separar os países, ou incluir mais uvas além das 5 mais frequentes, sem estimativas explosivas."
+    2. **Modelo hierárquico, para o efeito do avaliador.** "As notas vêm de 19 avaliadores, e as avaliações de um mesmo crítico não são independentes: há críticos mais rigorosos e mais generosos. Um efeito aleatório por avaliador, $u \sim \mathcal N(0, \sigma_u^2)$, separa o rigor do crítico do efeito do vinho. Isso importa porque cada crítico tende a cobrir certas regiões, e então o efeito do avaliador pode se misturar com o da origem."
+    3. **Posteriori de quantidades derivadas.** "Com MCMC, obtemos a distribuição a posteriori de qualquer função dos parâmetros. Por exemplo, um intervalo de credibilidade direto para os 5,1% de chance de 90+ do Cabernet de R$ 60 (Slide 28) e para o RR = 2,64 (Slide 27), sem depender do método delta."
+* **Se a banca perguntar se chegamos a ajustar o modelo bayesiano**: "Não no deck final. Em uma análise exploratória anterior (apostila do grupo, `docs/apostila/11-projeto.qmd`), controlar pelo avaliador mudou o coeficiente do Velho Mundo de 0,13 para 0,37. Esse número foi calculado com as classes antigas e não foi refeito para o $m_3$; serve só como indício de que o efeito do avaliador existe."
 
 ### Slide 31: Referências
 * **O que falar**:
