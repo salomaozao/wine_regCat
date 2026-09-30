@@ -131,12 +131,14 @@ novo  <- c("US", "Chile", "Argentina", "Australia", "South Africa", "New Zealand
 top_var <- names(sort(table(raw$variety), decreasing = TRUE))[1:5]
 
 K <- 5
-cortes <- quantile(raw$points, probs = seq(0, 1, length.out = K + 1), type = 1)
+# points e discreto com muitos empates: quantis exatos nao existem. Cortes escolhidos
+# para ficar o mais perto de 20% por classe, com classes 4 e 5 = 90+ pontos.
+cortes <- c(80, 85, 87, 89, 91, 100)
 
 wine <- raw |>
     filter(!is.na(price), !is.na(country), country != "", country != "US-France") |>
     mutate(
-        points_ord = cut(points, breaks = unique(cortes), include.lowest = TRUE,
+        points_ord = cut(points, breaks = cortes, include.lowest = TRUE,
                          labels = 1:K, ordered_result = TRUE),
         points_bin = as.integer(points >= 90),
         log_price = log(price),
@@ -149,7 +151,7 @@ wine <- raw |>
     )
 
 N <- nrow(wine)
-faixas <- c("80--86", "87--88", "89", "90--91", "92--100")
+faixas <- c("80--85", "86--87", "88--89", "90--91", "92--100")
 ```
 
 ```{r modelos}
@@ -158,24 +160,53 @@ m0 <- polr(points_ord ~ 1, data = wine, Hess = TRUE)
 m1 <- polr(points_ord ~ log_price, data = wine, Hess = TRUE)
 m2 <- polr(points_ord ~ log_price + terroir, data = wine, Hess = TRUE)
 m3 <- polr(points_ord ~ log_price + terroir + variety_top, data = wine, Hess = TRUE)
-fit_pom <- m2
+fit_pom <- m3
+form <- points_ord ~ log_price + terroir + variety_top
+
+# Rótulos dos coeficientes (LaTeX para tabelas, texto para gráficos)
+termos_txt <- c(
+    "log_price" = "log(preço)", "terroirVelho Mundo" = "Velho Mundo", "terroirOutros" = "Outros países",
+    "variety_topBordeaux-style Red Blend" = "Bordeaux Blend", "variety_topCabernet Sauvignon" = "Cabernet Sauvignon",
+    "variety_topChardonnay" = "Chardonnay", "variety_topPinot Noir" = "Pinot Noir", "variety_topRed Blend" = "Red Blend"
+)
+termos_tex <- replace(termos_txt, "log_price", "$\\log(\\text{price})$")
 
 # ---- Suposição de chances proporcionais ----
 teste_brant <- suppressWarnings(capture.output(res_brant <- brant::brant(fit_pom)))
 
 # ---- Modelos via VGAM (mesmo sinal do polr: reverse = TRUE) ----
-fit_pom_vgam <- vglm(points_ord ~ log_price + terroir,
-                     family = cumulative(parallel = TRUE, reverse = TRUE), data = wine)
-fit_ppom_preco <- suppressWarnings(vglm(points_ord ~ log_price + terroir,
-                     family = cumulative(parallel = FALSE ~ log_price, reverse = TRUE), data = wine))
-fit_ppom <- vglm(points_ord ~ log_price + terroir,
-                 family = cumulative(parallel = FALSE ~ terroir, reverse = TRUE), data = wine)
+fit_pom_vgam <- vglm(form, family = cumulative(parallel = TRUE, reverse = TRUE), data = wine)
+fit_ppom_preco <- suppressWarnings(vglm(form, family = cumulative(parallel = FALSE ~ log_price, reverse = TRUE), data = wine))
+fit_ppom <- vglm(form, family = cumulative(parallel = FALSE ~ terroir + variety_top, reverse = TRUE), data = wine)
 
 # ---- Modelo binário (>= 90 pontos = classes 4 e 5) ----
-fit_bin <- glm(points_bin ~ log_price + terroir, family = binomial(link = "logit"), data = wine)
+fit_bin <- glm(points_bin ~ log_price + terroir + variety_top, family = binomial(link = "logit"), data = wine)
 ```
 
 # Dados
+
+## Dados
+
+\scriptsize
+
+```{r cod-dados, echo=TRUE, eval=FALSE}
+raw  <- rio::import(here("data", "winemagv2.csv"))
+wine <- raw |>
+    filter(!is.na(price), !is.na(country),
+           !country %in% c("", "US-France")) |>
+    mutate(
+        points_ord = cut(points, c(80, 85, 87, 89, 91, 100),
+                         include.lowest = TRUE, labels = 1:5,
+                         ordered_result = TRUE),
+        points_bin = as.integer(points >= 90),
+        log_price  = log(price),
+        terroir    = case_when(country %in% velho ~ "Velho Mundo",
+                               country %in% novo  ~ "Novo Mundo",
+                               TRUE               ~ "Outros"),
+        # 5 uvas mais frequentes; demais em "Outras"
+        variety_top = if_else(variety %in% top_var, variety, "Outras")
+    )
+```
 
 ## Wine Enthusiast Reviews
 
@@ -200,7 +231,7 @@ tibble(
 \vspace{0.2cm}
 \centering\scriptsize Fonte: Kaggle, \texttt{winemag-data-130k-v2.csv}
 
-## Resposta ordinal: quintis empíricos
+## Resposta ordinal: cinco classes
 
 ```{r g-resposta, fig.height=3.2}
 contagem <- wine |> count(points, points_ord)
@@ -249,6 +280,52 @@ g_preco + g_regiao + plot_layout(widths = c(1.4, 1))
 \textbf{Velho Mundo:} França, Itália, Espanha, Portugal, Alemanha, Áustria \quad
 \textbf{Novo Mundo:} EUA, Chile, Argentina, Austrália, África do Sul, Nova Zelândia
 
+## Vinhos por país
+
+```{r g-paises, fig.height=3.4}
+nomes_pt <- c(
+    "US" = "EUA", "Chile" = "Chile", "Argentina" = "Argentina", "Australia" = "Austrália",
+    "South Africa" = "África do Sul", "New Zealand" = "Nova Zelândia",
+    "France" = "França", "Italy" = "Itália", "Spain" = "Espanha", "Portugal" = "Portugal",
+    "Germany" = "Alemanha", "Austria" = "Áustria",
+    "Israel" = "Israel", "Greece" = "Grécia", "Canada" = "Canadá", "Hungary" = "Hungria",
+    "Bulgaria" = "Bulgária", "Romania" = "Romênia", "Uruguay" = "Uruguai", "Turkey" = "Turquia"
+)
+n_top_outros <- 8
+
+por_pais_reg <- wine |>
+    count(terroir, country) |>
+    group_by(terroir) |>
+    mutate(pais = if_else(terroir == "Outros" & rank(-n, ties.method = "first") > n_top_outros,
+                          "Demais", coalesce(unname(nomes_pt[country]), country))) |>
+    group_by(terroir, pais) |>
+    summarise(n = sum(n), n_paises = n(), .groups = "drop") |>
+    mutate(pais = if_else(pais == "Demais", paste0("Demais (", n_paises, " países)"), pais))
+
+rotulos_reg <- por_pais_reg |>
+    group_by(terroir) |>
+    summarise(n = sum(n)) |>
+    mutate(rot = paste0(terroir, " (", pct(n / sum(n)), ")"))
+
+por_pais_reg |>
+    mutate(terroir = factor(terroir, levels = rotulos_reg$terroir, labels = rotulos_reg$rot),
+           ordem = if_else(startsWith(pais, "Demais"), -Inf, n),
+           pais = reorder(paste(pais, terroir, sep = "___"), ordem)) |>
+    ggplot(aes(n, pais, fill = terroir)) +
+    geom_col(width = 0.7) +
+    geom_text(aes(label = num(n, 0)), hjust = -0.15, size = 2.3, color = "gray20") +
+    facet_wrap(~terroir, scales = "free") +
+    scale_y_discrete(labels = function(x) sub("___.*$", "", x)) +
+    scale_x_continuous(labels = label_number(big.mark = "."), breaks = breaks_extended(3),
+                       expand = expansion(mult = c(0, 0.45))) +
+    coord_cartesian(clip = "off") +
+    scale_fill_manual(values = setNames(cores_regiao, rotulos_reg$rot), guide = "none") +
+    labs(x = "Número de vinhos", y = NULL) +
+    theme(panel.grid.major.y = element_blank(), panel.grid.major.x = element_line(color = "gray92"),
+          axis.text.y = element_text(size = 7.5), axis.text.x = element_text(size = 6.5),
+          strip.text = element_text(size = 8.5), strip.clip = "off", panel.spacing = unit(1.2, "lines"))
+```
+
 ## Preço $\times$ classe
 
 ```{r g-preco-classe, fig.height=3.5}
@@ -258,7 +335,8 @@ ggplot(wine, aes(points_ord, price, fill = points_ord)) +
     geom_violin(alpha = 0.55, color = NA, scale = "width", trim = TRUE) +
     geom_boxplot(width = 0.18, fill = "white", color = "gray20", outlier.shape = NA, linewidth = 0.35) +
     geom_label(data = medianas, aes(y = med, label = dollar(med)), fill = "white",
-               size = 2.6, vjust = -0.6, label.size = 0.15, color = "gray10") +
+               size = 2.6, hjust = 0, vjust = 0.5, label.size = 0.15, color = "gray10",
+               position = position_nudge(x = 0.12)) +
     scale_y_log10(breaks = c(5, 10, 25, 50, 100, 250, 1000, 3000), labels = label_dollar(accuracy = 1)) +
     scale_x_discrete(labels = paste0(1:5, "\n(", gsub("--", "–", faixas), ")")) +
     scale_fill_manual(values = cores_classe, guide = "none") +
@@ -304,7 +382,52 @@ ggplot(mapa) +
 
 \centering\tiny Cinza: sem avaliações ou menos de 50 vinhos com preço.
 
+## Uva $\times$ classe
+
+```{r g-uva-classe, fig.height=3.3}
+por_uva <- wine |>
+    group_by(variety_top) |>
+    summarise(p90 = mean(points_bin), n = n(), .groups = "drop") |>
+    mutate(rotulo = paste0(variety_top, "\n(", pct(n / N), " da amostra)"))
+
+wine |>
+    count(variety_top, points_ord) |>
+    group_by(variety_top) |>
+    mutate(prop = n / sum(n)) |>
+    ungroup() |>
+    left_join(por_uva |> select(variety_top, p90, rotulo), by = "variety_top") |>
+    mutate(rotulo = fct_reorder(rotulo, p90)) |>
+    ggplot(aes(prop, rotulo, fill = points_ord)) +
+    geom_col(width = 0.7, position = position_stack(reverse = TRUE)) +
+    geom_vline(xintercept = 1 - mean(wine$points_bin), linetype = "dashed", color = "gray30", linewidth = 0.4) +
+    scale_x_continuous(labels = label_percent(accuracy = 1), expand = expansion(mult = c(0, 0.02))) +
+    scale_fill_manual(values = cores_classe,
+                      labels = paste0(1:5, ": ", gsub("--", "–", faixas)), name = "Classe") +
+    labs(x = "Proporção de vinhos", y = NULL) +
+    theme(legend.position = "bottom", legend.key.size = unit(0.3, "cm"),
+          panel.grid.major.y = element_blank(), axis.text.y = element_text(size = 7.5))
+```
+
+\centering\tiny Tracejado: parcela abaixo de 90 pontos na amostra toda. Ordenado pela proporção de 90+.
+
 # Modelo ordinal
+
+## Modelo ordinal
+
+\scriptsize
+
+```{r cod-ordinal, echo=TRUE, eval=FALSE}
+library(MASS)
+m0 <- polr(points_ord ~ 1, data = wine, Hess = TRUE)
+m1 <- update(m0, . ~ . + log_price)
+m2 <- update(m1, . ~ . + terroir)
+m3 <- update(m2, . ~ . + variety_top)    # modelo escolhido
+
+anova(m0, m1, m2, m3)                    # TRV sequencial
+AIC(m0, m1, m2, m3); BIC(m0, m1, m2, m3)
+
+predict(m3, novos_dados, type = "probs") # P(Y = j | x)
+```
 
 ## Modelo de chances proporcionais
 
@@ -325,13 +448,17 @@ Y = j \iff \alpha_{j-1} < Y^* \le \alpha_j
 \end{block}
 
 \begin{block}{Preditor}
+
 \[
 \mathbf{x}^\top\boldsymbol\beta =
 \beta_1 \log(\text{price}) + \beta_2\,\mathbb{I}_{\text{Velho Mundo}} + \beta_3\,\mathbb{I}_{\text{Outros}}
++ \sum_{k=1}^{5} \gamma_k\,\mathbb{I}_{\text{uva} = k}
 \]
 \end{block}
 
 ## Seleção de variáveis
+
+\centering\scriptsize\textcolor{gray}{Pacote \texttt{MASS}: \texttt{polr()}}
 
 ```{r tab-selecao}
 mods <- list(m0, m1, m2, m3)
@@ -351,7 +478,7 @@ tibble(
     `p` = c("---", fmt_pv(pchisq(trv[-1], dgl[-1], lower.tail = FALSE)))
 ) |>
     tab(align = "llrrrrrr", size = 7) |>
-    row_spec(3, bold = TRUE)
+    row_spec(4, bold = TRUE)
 ```
 
 \vspace{0.3cm}
@@ -365,7 +492,9 @@ tibble(
 ) |> tab(align = "lrr", size = 8)
 ```
 
-## Modelo ajustado ($m_2$)
+## Modelo ajustado ($m_3$)
+
+\centering\scriptsize\textcolor{gray}{Pacote \texttt{MASS}: \texttt{polr()}}
 
 ```{r tab-m2}
 b <- coef(fit_pom)
@@ -375,7 +504,7 @@ ep_a <- sqrt(diag(vcov(fit_pom)))[names(a)]
 
 bind_rows(
     tibble(
-        `Parâmetro` = c("$\\log(\\text{price})$", "Velho Mundo", "Outros"),
+        `Parâmetro` = unname(termos_tex[names(b)]),
         Estimativa = num(b, 3), EP = num(ep, 3), z = num(b / ep, 1),
         OR = num(exp(b), 2),
         `IC 95\\% (OR)` = paste0("[", num(exp(b - 1.96 * ep), 2), "; ", num(exp(b + 1.96 * ep), 2), "]")
@@ -385,30 +514,64 @@ bind_rows(
         Estimativa = num(a, 3), EP = num(ep_a, 3), z = num(a / ep_a, 1), OR = "", `IC 95\\% (OR)` = ""
     )
 ) |>
-    tab(align = "lrrrrr", size = 8) |>
-    pack_rows("Efeitos", 1, 3, latex_gap_space = "0.2em") |>
-    pack_rows("Pontos de corte", 4, 7, latex_gap_space = "0.2em")
+    tab(align = "lrrrrr", size = 6.5) |>
+    pack_rows("Preço", 1, 1, latex_gap_space = "0.1em") |>
+    pack_rows("Região (ref.: Novo Mundo)", 2, 3, latex_gap_space = "0.1em") |>
+    pack_rows("Uva (ref.: Outras)", 4, 8, latex_gap_space = "0.1em") |>
+    pack_rows("Pontos de corte", 9, 12, latex_gap_space = "0.1em")
 ```
-
-\vspace{0.3cm}
 
 ```{r tab-dobro}
 or2 <- 2^b["log_price"]
 ep2 <- log(2) * ep["log_price"]
-tibble(
-    ` ` = "Preço dobra ($2^{\\hat\\beta_1}$)",
-    OR = num(or2, 2),
-    `IC 95\\%` = paste0("[", num(exp(log(or2) - 1.96 * ep2), 2), "; ", num(exp(log(or2) + 1.96 * ep2), 2), "]")
-) |> tab(align = "lrr", size = 8)
+ic2 <- exp(log(or2) + c(-1, 1) * 1.96 * ep2)
+```
+
+\centering\scriptsize Preço dobra: $2^{\hat\beta_1} =$ `r num(or2, 2)` \quad IC 95\%: [`r num(ic2[1], 2)`; `r num(ic2[2], 2)`]
+
+## Variável latente $Y^*$ e limiares
+
+```{r g-latente, fig.height=3.5}
+alfa <- fit_pom$zeta
+precos_ex <- c(15, 80)
+eta <- coef(fit_pom)["log_price"] * log(precos_ex) # Novo Mundo e uva "Outras" (referências)
+paineis <- paste0("US$ ", precos_ex, " (Novo Mundo, outras uvas):  x'β = ", num(eta, 2))
+paineis <- factor(paineis, levels = paineis)
+
+dens <- expand_grid(i = 1:2, y = seq(1, 15, length.out = 600)) |>
+    mutate(painel = paineis[i], f = dlogis(y, eta[i]),
+           classe = factor(findInterval(y, alfa) + 1, levels = 1:K))
+
+p_classe <- expand_grid(i = 1:2, j = 1:K) |>
+    mutate(painel = paineis[i],
+           p = plogis(c(alfa, Inf)[j] - eta[i]) - plogis(c(-Inf, alfa)[j] - eta[i]),
+           x = (c(1.5, alfa)[j] + c(alfa, 14.5)[j]) / 2)
+
+ggplot(dens, aes(y, f)) +
+    geom_area(aes(fill = classe, group = classe), position = "identity", alpha = 0.85) +
+    geom_line(linewidth = 0.4, color = "gray20") +
+    geom_vline(xintercept = alfa, linetype = "dashed", color = "#B22222", linewidth = 0.45) +
+    geom_text(data = tibble(x = alfa, rot = paste0("alpha[", 1:4, "]")), aes(x = x, y = 0.305, label = rot),
+              parse = TRUE, color = "#B22222", size = 3, hjust = 0.5, vjust = 0) +
+    geom_label(data = p_classe, aes(x = x, y = 0.275, label = pct(p, 0)),
+               size = 2.4, label.size = 0, fill = "white", color = "gray15") +
+    facet_wrap(~painel, ncol = 1) +
+    scale_fill_manual(values = cores_classe, labels = paste0(1:5, ": ", gsub("--", "–", faixas)), name = "Classe") +
+    scale_x_continuous(breaks = seq(2, 14, 2)) +
+    scale_y_continuous(limits = c(0, 0.33), breaks = NULL) +
+    labs(x = expression(Y^"*"), y = NULL) +
+    theme(legend.position = "bottom", legend.key.size = unit(0.3, "cm"))
 ```
 
 ## Probabilidades preditas
+
+\centering\scriptsize\textcolor{gray}{Pacote \texttt{MASS}: \texttt{predict(m3, type = "probs")}}
 
 ```{r g-probs, fig.height=3.5}
 grade <- expand_grid(
     price = exp(seq(log(5), log(500), length.out = 150)),
     terroir = factor(levels(wine$terroir), levels(wine$terroir))
-) |> mutate(log_price = log(price))
+) |> mutate(log_price = log(price), variety_top = factor("Outras", levels(wine$variety_top)))
 
 probs <- predict(fit_pom, grade, type = "probs")
 bind_cols(grade, as_tibble(probs)) |>
@@ -424,9 +587,32 @@ bind_cols(grade, as_tibble(probs)) |>
           panel.spacing = unit(0.8, "lines"))
 ```
 
+\centering\tiny Uva fixada em ``Outras''; um painel por região.
+
 # Chances proporcionais
 
+## Chances proporcionais
+
+\scriptsize
+
+```{r cod-cp, echo=TRUE, eval=FALSE}
+brant::brant(m3)                         # teste de Brant
+
+# um logito binario por corte: Y > j
+colapsos <- map(1:4, \(j) glm(
+    I(as.integer(points_ord) > j) ~ log_price + terroir + variety_top,
+    family = binomial, data = wine))
+
+# chances proporcionais parciais: regiao e uva livres por corte
+fit_ppom <- VGAM::vglm(
+    points_ord ~ log_price + terroir + variety_top,
+    family = cumulative(parallel = FALSE ~ terroir + variety_top,
+                        reverse = TRUE), data = wine)
+```
+
 ## Teste de Brant
+
+\centering\scriptsize\textcolor{gray}{Pacote \texttt{brant}: \texttt{brant()}}
 
 \centering $H_0: \boldsymbol\beta_1 = \boldsymbol\beta_2 = \boldsymbol\beta_3 = \boldsymbol\beta_4$
 
@@ -434,11 +620,13 @@ bind_cols(grade, as_tibble(probs)) |>
 
 ```{r tab-brant}
 tibble(
-    Teste = c("Omnibus", "$\\log(\\text{price})$", "Velho Mundo", "Outros"),
+    Teste = c("Omnibus", unname(termos_tex[rownames(res_brant)[-1]])),
     `$\\chi^2$` = num(res_brant[, "X2"], 1),
     gl = res_brant[, "df"],
     p = fmt_pv(res_brant[, "probability"])
-) |> tab(align = "lrrr", size = 9)
+) |>
+    tab(align = "lrrr", size = 8) |>
+    row_spec(1, bold = TRUE)
 ```
 
 \vspace{0.4cm}
@@ -449,110 +637,106 @@ tibble(
 
 ## Colapsamentos binários sucessivos
 
+\centering\scriptsize\textcolor{gray}{Pacote \texttt{stats}: \texttt{glm(family = binomial)}, um por corte}
+
 ```{r g-colapsos, fig.height=3.3}
-nomes_cov <- c("log_price" = "log(preço)", "terroirVelho Mundo" = "Velho Mundo", "terroirOutros" = "Outros")
-cortes_lab <- paste0("Y > ", 1:4, "\n(", c("87", "89", "90", "92"), "+)")
+cortes_lab <- paste0("Y>", 1:4, "\n(", c("86", "88", "90", "92"), "+)")
 
 colapsos <- map_dfr(1:(K - 1), function(j) {
     yb <- as.integer(as.integer(wine$points_ord) > j)
-    m <- glm(yb ~ log_price + terroir, family = binomial, data = wine)
+    m <- glm(yb ~ log_price + terroir + variety_top, family = binomial, data = wine)
     tibble(corte = cortes_lab[j], termo = names(coef(m))[-1],
            est = coef(m)[-1], ep = sqrt(diag(vcov(m)))[-1])
 })
 ref_pom <- tibble(termo = names(coef(fit_pom)), pom = coef(fit_pom))
+rot_painel <- setNames(paste0(termos_txt[ref_pom$termo], "\nm3: ", num(ref_pom$pom, 2)), ref_pom$termo)
 
 colapsos |>
     left_join(ref_pom, by = "termo") |>
-    mutate(termo = factor(nomes_cov[termo], levels = nomes_cov),
+    mutate(termo = factor(rot_painel[termo], levels = rot_painel),
            corte = factor(corte, levels = cortes_lab)) |>
     ggplot(aes(corte, est)) +
     geom_hline(aes(yintercept = pom), linetype = "dashed", color = "gray45", linewidth = 0.4) +
     geom_pointrange(aes(ymin = est - 1.96 * ep, ymax = est + 1.96 * ep),
-                    color = "#2E5EAA", size = 0.3, linewidth = 0.6) +
-    facet_wrap(~termo) +
-    labs(x = NULL, y = expression(hat(beta)[j] ~ "(IC 95%)")) +
-    theme(axis.text.x = element_text(size = 7), panel.grid.major.y = element_line(color = "gray92"))
+                    color = "#2E5EAA", size = 0.2, linewidth = 0.5) +
+    geom_label(aes(label = num(est, 2)), nudge_x = 0.38, size = 1.9, color = "gray15",
+               fill = "white", label.size = 0, label.padding = unit(0.05, "lines")) +
+    facet_wrap(~termo, ncol = 4, scales = "free_y") +
+    scale_x_discrete(expand = expansion(add = c(0.5, 0.95))) +
+    labs(x = NULL, y = expression(hat(beta)[j])) +
+    theme(axis.text.x = element_text(size = 5.5), axis.text.y = element_text(size = 6),
+          strip.text = element_text(size = 7, lineheight = 0.9),
+          panel.grid.major.y = element_line(color = "gray92"))
 ```
 
-\centering\tiny Tracejado: estimativa do modelo de chances proporcionais ($m_2$).
+\centering\tiny Tracejado: estimativa do modelo de chances proporcionais ($m_3$). Barras: IC 95\%.
 
 ## Chances proporcionais parciais
 
-\centering\small
-$\operatorname{logit} P(Y > j) = \alpha_j + \beta_1\log(\text{price}) + \beta_{2j}\,\mathbb{I}_{\text{VM}} + \beta_{3j}\,\mathbb{I}_{\text{Outros}}$
+\centering\scriptsize\textcolor{gray}{Pacote \texttt{VGAM}: \texttt{vglm()}, região e uva livres por corte}
 
-\vspace{0.2cm}
+\footnotesize
+$\operatorname{logit} P(Y > j) = \alpha_j + \beta_1\log(\text{price}) + \boldsymbol\beta_{j}^\top\,\text{região} + \boldsymbol\gamma_{j}^\top\,\text{uva}$
 
 ```{r tab-ppom-comp}
 comp <- list("Proporcional (POM)" = fit_pom_vgam,
              "Parcial: preço livre" = fit_ppom_preco,
-             "Parcial: região livre" = fit_ppom)
+             "Parcial: região e uva livres" = fit_ppom)
+trv_pom <- function(m) {
+    if (identical(m, fit_pom_vgam)) return("---")
+    lr <- suppressWarnings(2 * (logLik(m) - logLik(fit_pom_vgam)))
+    if (!is.finite(lr)) return("indefinido")
+    dg <- df.residual(fit_pom_vgam) - df.residual(m)
+    paste0(num(lr, 1), " (", dg, "), p ", fmt_pv(pchisq(lr, dg, lower.tail = FALSE)))
+}
 tibble(
     Modelo = names(comp),
     `Parâm.` = sapply(comp, function(m) length(coef(m))),
-    AIC = sapply(comp, function(m) { v <- suppressWarnings(AIC(m)); ifelse(is.finite(v), num(v, 0), "NaN") }),
-    `$\\min \\hat P(Y=j)$` = sapply(comp, function(m) num(min(fitted(m)), 4))
+    AIC = sapply(comp, function(m) { v <- suppressWarnings(AIC(m)); ifelse(is.finite(v), num(v, 0), "indefinido") }),
+    `Vinhos com $\\hat P < 0$` = sapply(comp, function(m) num(sum(apply(fitted(m), 1, min) < 0), 0)),
+    `TRV vs. POM (gl)` = sapply(comp, trv_pom)
 ) |>
-    tab(align = "lrrr", size = 8) |>
+    tab(align = "lrrrr", size = 6.5) |>
     row_spec(3, bold = TRUE)
 ```
 
-\vspace{0.2cm}
+\tiny Preço livre: as curvas acumuladas se cruzam e $\hat P(Y = j) < 0$ torna a verossimilhança indefinida. No parcial, $\hat\beta_1 =$ `r num(coef(fit_ppom)["log_price"], 3)` (comum aos cortes).
 
 ```{r tab-ppom-coef}
 cf <- coef(fit_ppom)
-ep_p <- sqrt(diag(vcov(fit_ppom)))
-pega <- function(pref) {
-    nm <- paste0(pref, ":", 1:4)
-    paste0(num(cf[nm], 3), " (", num(ep_p[nm], 3), ")")
-}
+livres <- setdiff(names(termos_txt), "log_price")
 tibble(
-    Corte = paste0("$Y > ", 1:4, "$"),
-    `$\\alpha_j$` = pega("(Intercept)"),
-    `Velho Mundo` = pega("terroirVelho Mundo"),
-    Outros = pega("terroirOutros"),
-    `$\\log(\\text{price})$` = c(paste0(num(cf["log_price"], 3), " (", num(ep_p["log_price"], 3), ")"), "", "", "")
-) |> tab(align = "lrrrr", size = 7.5)
+    Termo = c("$\\alpha_j$", unname(termos_tex[livres])),
+    !!!setNames(lapply(1:4, function(j) {
+        c(num(cf[paste0("(Intercept):", j)], 2), num(cf[paste0(livres, ":", j)], 2))
+    }), paste0("$Y > ", 1:4, "$"))
+) |>
+    tab(align = "lrrrr", size = 6)
 ```
-
-\vspace{0.1cm}
-
-```{r tab-ppom-lrt}
-lr <- 2 * (logLik(fit_ppom) - logLik(fit_pom_vgam))
-dgl_p <- df.residual(fit_pom_vgam) - df.residual(fit_ppom)
-tibble(` ` = "TRV: parcial vs. POM", TRV = num(lr, 1), gl = dgl_p,
-       p = fmt_pv(pchisq(lr, dgl_p, lower.tail = FALSE))) |>
-    tab(align = "lrrr", size = 7.5)
-```
-
-## Resíduos substitutos
-
-```{r g-residuos, fig.height=3.6}
-# Amostra aleatória simples (sem estratificar pela resposta, que distorceria o modelo)
-set.seed(262)
-sub <- slice_sample(wine, n = 5000)
-fit_sub <- polr(points_ord ~ log_price + terroir, data = sub, Hess = TRUE)
-
-pequeno <- theme(plot.title = element_text(size = 8.5, face = "bold", color = navy),
-                 axis.title = element_text(size = 7.5), axis.text = element_text(size = 7))
-
-r1 <- sure::autoplot.polr(fit_sub, what = "qq", nsim = 10, alpha = 0.3) +
-    labs(title = "QQ (logística)") + tema + pequeno
-r2 <- sure::autoplot.polr(fit_sub, what = "fitted", nsim = 1, alpha = 0.15) +
-    labs(title = "Resíduo × ajustado") + tema + pequeno
-r3 <- sure::autoplot.polr(fit_sub, what = "covariate", x = sub$log_price, nsim = 1, alpha = 0.15) +
-    labs(title = "Resíduo × log(preço)", x = "log(preço)") + tema + pequeno
-r4 <- sure::autoplot.polr(fit_sub, what = "covariate", x = sub$terroir, nsim = 1, alpha = 0.15) +
-    labs(title = "Resíduo × região", x = NULL) + tema + pequeno
-
-(r1 + r2) / (r3 + r4)
-```
-
-\centering\tiny Amostra aleatória simples, $n = 5.000$.
 
 # Modelo binário
 
+## Modelo binário
+
+\scriptsize
+
+```{r cod-bin, echo=TRUE, eval=FALSE}
+fit_bin <- glm(points_bin ~ log_price + terroir + variety_top,
+               family = binomial, data = wine)
+
+library(pROC)
+roc_bin <- roc(wine$points_bin, fitted(fit_bin))
+p_ord   <- rowSums(predict(m3, type = "probs")[, 4:5])  # P(Y >= 4)
+roc_ord <- roc(wine$points_bin, p_ord)
+
+auc(roc_bin); auc(roc_ord)
+coords(roc_bin, "best",                  # corte de Youden
+       ret = c("threshold", "sensitivity", "specificity"))
+```
+
 ## Dicotomização: 90+ pontos
+
+\centering\scriptsize\textcolor{gray}{Pacote \texttt{stats}: \texttt{glm(family = binomial)}}
 
 \centering\small
 $Y_{\text{bin}} = \mathbb{I}(\text{points} \ge 90) = \mathbb{I}(Y \in \{4, 5\})$
@@ -567,31 +751,22 @@ ep_bin <- sqrt(diag(vcov(fit_bin)))[-1]
 b_ord <- coef(fit_pom)
 ep_ord <- sqrt(diag(vcov(fit_pom)))[names(b_ord)]
 b_pp <- coef(fit_ppom)
-ep_pp <- sqrt(diag(vcov(fit_ppom)))
+b_pp3 <- ifelse(names(b_ord) == "log_price", b_pp["log_price"], b_pp[paste0(names(b_ord), ":3")])
 
 tibble(
-    ` ` = c("$\\log(\\text{price})$", "Velho Mundo", "Outros"),
-    `Ordinal $\\hat\\beta$` = num(b_ord, 3),
-    `(EP)` = num(ep_ord, 4),
-    `Parcial $\\hat\\beta_3$` = c(num(b_pp["log_price"], 3), num(b_pp["terroirVelho Mundo:3"], 3), num(b_pp["terroirOutros:3"], 3)),
-    `Binário $\\hat\\beta$` = num(b_bin, 3),
-    `(EP) ` = num(ep_bin, 4),
+    ` ` = unname(termos_tex[names(b_ord)]),
+    `Ordinal $\\hat\\beta$ (EP)` = paste0(num(b_ord, 2), " (", num(ep_ord, 3), ")"),
+    `Parcial $\\hat\\beta_3$` = num(b_pp3, 2),
+    `Binário $\\hat\\beta$ (EP)` = paste0(num(b_bin, 2), " (", num(ep_bin, 3), ")"),
+    `OR ord.` = num(exp(b_ord), 2),
+    `OR bin.` = num(exp(b_bin), 2),
     `$\\text{EP}^2_{\\text{bin}}/\\text{EP}^2_{\\text{ord}}$` = num((ep_bin / ep_ord)^2, 2)
-) |> tab(align = "lrrrrrr", size = 7.5)
-```
-
-\vspace{0.3cm}
-
-```{r tab-or-bin}
-tibble(
-    ` ` = c("$\\log(\\text{price})$", "Velho Mundo", "Outros"),
-    `OR ordinal` = num(exp(b_ord), 2),
-    `OR binário` = num(exp(b_bin), 2),
-    `IC 95\\% (binário)` = paste0("[", num(exp(b_bin - 1.96 * ep_bin), 2), "; ", num(exp(b_bin + 1.96 * ep_bin), 2), "]")
-) |> tab(align = "lrrr", size = 8)
+) |> tab(align = "lrrrrrr", size = 6.5)
 ```
 
 ## Discriminação: 90+ pontos
+
+\centering\scriptsize\textcolor{gray}{Pacote \texttt{pROC}: \texttt{roc()}, \texttt{auc()}, \texttt{coords()}}
 
 ```{r g-roc, fig.height=3.2}
 roc_bin <- roc(wine$points_bin, fitted(fit_bin), quiet = TRUE)
@@ -615,12 +790,110 @@ ggroc(setNames(list(roc_bin, roc_ord), rot), linewidth = 0.7, legacy.axes = TRUE
 \centering\scriptsize
 Youden: corte $= `r num(youden$threshold, 3)`$ \quad sensibilidade $= `r pct_tex(youden$sensitivity)`$ \quad especificidade $= `r pct_tex(youden$specificity)`$
 
+# Diagnóstico
+
+## Diagnóstico
+
+\scriptsize
+
+```{r cod-diag, echo=TRUE, eval=FALSE}
+# ordinal: residuos substitutos do pacote sure (amostra de 5.000)
+sure::autoplot.polr(m3_amostra, what = "qq")
+
+# binario: mesma construcao (Liu & Zhang) com J = 2
+eta <- predict(bin_amostra, type = "link")
+u   <- ifelse(y == 1, runif(n, plogis(-eta), 1),   # Y* > 0
+                      runif(n, 0, plogis(-eta)))    # Y* <= 0
+r   <- qlogis(u)                                    # residuo ~ Logistica(0, 1)
+```
+
+## Resíduos substitutos: ordinal
+
+\centering\scriptsize\textcolor{gray}{Pacote \texttt{sure}: \texttt{autoplot.polr()}}
+
+```{r g-residuos, fig.height=3.4}
+# Amostra aleatória simples (sem estratificar pela resposta, que distorceria o modelo)
+set.seed(262)
+sub <- slice_sample(wine, n = 5000)
+fit_sub <- polr(points_ord ~ log_price + terroir + variety_top, data = sub, Hess = TRUE)
+
+pequeno <- theme(plot.title = element_text(size = 8, face = "bold", color = navy),
+                 axis.title = element_text(size = 7), axis.text = element_text(size = 6.5))
+uva_curta <- function(x) fct_recode(x, "Bordeaux" = "Bordeaux-style Red Blend", "Cabernet" = "Cabernet Sauvignon")
+
+r1 <- sure::autoplot.polr(fit_sub, what = "qq", nsim = 10, alpha = 0.3) +
+    labs(title = "QQ (logística)", x = "Quantil teórico", y = "Resíduo") + tema + pequeno
+r2 <- sure::autoplot.polr(fit_sub, what = "fitted", nsim = 1, alpha = 0.15) +
+    labs(title = "Resíduo × ajustado", x = "x'β", y = "Resíduo") + tema + pequeno
+r3 <- sure::autoplot.polr(fit_sub, what = "covariate", x = sub$log_price, nsim = 1, alpha = 0.15) +
+    labs(title = "Resíduo × log(preço)", x = "log(preço)", y = "Resíduo") + tema + pequeno
+r4 <- sure::autoplot.polr(fit_sub, what = "covariate", x = sub$terroir, nsim = 1, alpha = 0.15) +
+    labs(title = "Resíduo × região", x = NULL, y = "Resíduo") + tema + pequeno
+r5 <- sure::autoplot.polr(fit_sub, what = "covariate", x = uva_curta(sub$variety_top), nsim = 1, alpha = 0.15) +
+    labs(title = "Resíduo × uva", x = NULL, y = "Resíduo") + tema + pequeno +
+    theme(axis.text.x = element_text(size = 5.5, angle = 20, hjust = 1))
+
+(r1 + r2 + r3) / (r4 + r5)
+```
+
+\centering\tiny Amostra aleatória simples, $n = 5.000$.
+
+## Resíduos substitutos: binário
+
+\centering\scriptsize\textcolor{gray}{Construção de Liu \& Zhang (2018) com $J = 2$: $R = S - \mathbf{x}^\top\hat{\boldsymbol\beta}$, $S$ logística truncada em $Y^* > 0$ ou $Y^* \le 0$}
+
+```{r g-residuos-bin, fig.height=3.4}
+set.seed(262)
+fit_sub_bin <- glm(points_bin ~ log_price + terroir + variety_top, family = binomial, data = sub)
+eta_b <- predict(fit_sub_bin, type = "link")
+corte0 <- plogis(-eta_b)
+u_b <- ifelse(sub$points_bin == 1, runif(nrow(sub), corte0, 1), runif(nrow(sub), 0, corte0))
+res_bin <- tibble(r = qlogis(u_b), eta = eta_b, log_price = sub$log_price,
+                  terroir = sub$terroir, uva = uva_curta(sub$variety_top))
+
+pts <- list(geom_point(alpha = 0.15, size = 0.4, color = "gray30"),
+            geom_smooth(method = "loess", se = FALSE, color = "#B22222", linewidth = 0.6),
+            geom_hline(yintercept = 0, linetype = "dashed", color = "gray50"))
+
+b1 <- ggplot(res_bin, aes(sample = r)) +
+    stat_qq(distribution = qlogis, size = 0.4, alpha = 0.3) +
+    stat_qq_line(distribution = qlogis, color = "#B22222") +
+    labs(title = "QQ (logística)", x = "Quantil teórico", y = "Resíduo") + pequeno
+b2 <- ggplot(res_bin, aes(eta, r)) + pts + labs(title = "Resíduo × ajustado", x = "x'β", y = "Resíduo") + pequeno
+b3 <- ggplot(res_bin, aes(log_price, r)) + pts + labs(title = "Resíduo × log(preço)", x = "log(preço)", y = "Resíduo") + pequeno
+b4 <- ggplot(res_bin, aes(terroir, r)) + geom_boxplot(outlier.size = 0.3, fill = "gray90") +
+    labs(title = "Resíduo × região", x = NULL, y = "Resíduo") + pequeno
+b5 <- ggplot(res_bin, aes(uva, r)) + geom_boxplot(outlier.size = 0.3, fill = "gray90") +
+    labs(title = "Resíduo × uva", x = NULL, y = "Resíduo") + pequeno +
+    theme(axis.text.x = element_text(size = 5.5, angle = 20, hjust = 1))
+
+suppressMessages(print((b1 + b2 + b3) / (b4 + b5)))
+```
+
+\centering\tiny Mesma amostra aleatória simples, $n = 5.000$.
+
 # Conclusão
+
+## Conclusão
+
+\scriptsize
+
+```{r cod-conc, echo=TRUE, eval=FALSE}
+# Cabernet Sauvignon de R$ 60 (cambio de R$ 5,16 por US$, fechamento de 30/09/2026)
+nd <- tibble(log_price   = log(60 / 5.16),
+             terroir     = c("Novo Mundo", "Velho Mundo"),
+             variety_top = "Cabernet Sauvignon")
+p  <- rowSums(predict(m3, nd, type = "probs")[, 4:5])  # P(90+)
+
+chance <- p / (1 - p)
+or     <- chance[2] / chance[1]    # = exp(beta_Velho Mundo)
+```
 
 ## Razão de chances $\times$ risco relativo
 
 ```{r or-rr}
-nd <- tibble(log_price = log(c(20, 40)), terroir = factor("Novo Mundo", levels(wine$terroir)))
+nd <- tibble(log_price = log(c(20, 40)), terroir = factor("Novo Mundo", levels(wine$terroir)),
+             variety_top = factor("Outras", levels(wine$variety_top)))
 pp <- predict(fit_bin, nd, type = "response")
 p20 <- pp[1]; p40 <- pp[2]
 or_c <- (p40 / (1 - p40)) / (p20 / (1 - p20))
@@ -637,7 +910,7 @@ rr_c <- p40 / p20
 
 ```{r tab-or-rr}
 tibble(
-    `Vinho do Novo Mundo` = c("US\\$ 20", "US\\$ 40"),
+    `Novo Mundo, outras uvas` = c("US\\$ 20", "US\\$ 40"),
     `$\\hat P(\\text{90+})$` = pct(c(p20, p40)),
     `Chance $\\hat\\pi/(1-\\hat\\pi)$` = num(c(p20 / (1 - p20), p40 / (1 - p40)), 3)
 ) |> tab(align = "lrr", size = 9)
@@ -653,6 +926,48 @@ tibble(
     `Prevalência de 90+` = pct(mean(wine$points_bin))
 ) |> tab(align = "rrrr", size = 9)
 ```
+
+## Exemplo: Cabernet Sauvignon de R\$ 60
+
+\centering\scriptsize\textcolor{gray}{Modelo ordinal $m_3$: $\hat P(\text{90+}) = \hat P(Y \ge 4) = 1 - \operatorname{logit}^{-1}(\hat\alpha_3 - \mathbf{x}^\top\hat{\boldsymbol\beta})$}
+
+```{r tab-cabernet}
+cambio <- 5.16 # R$ por US$ (fechamento de 30/09/2026)
+cenarios <- tribble(
+    ~Vinho,                                   ~brl, ~terroir,      ~uva,
+    "Cabernet, Novo Mundo, R\\$ 60",          60,   "Novo Mundo",  "Cabernet Sauvignon",
+    "Cabernet, Novo Mundo, R\\$ 120",         120,  "Novo Mundo",  "Cabernet Sauvignon",
+    "Cabernet, Velho Mundo, R\\$ 60",         60,   "Velho Mundo", "Cabernet Sauvignon",
+    "Cabernet, Outros países, R\\$ 60",       60,   "Outros",      "Cabernet Sauvignon",
+    "Outra uva, Novo Mundo, R\\$ 60",         60,   "Novo Mundo",  "Outras"
+) |>
+    mutate(log_price = log(brl / cambio),
+           terroir = factor(terroir, levels(wine$terroir)),
+           variety_top = factor(uva, levels(wine$variety_top)))
+
+p_cab <- rowSums(predict(fit_pom, cenarios, type = "probs")[, 4:5])
+chance_cab <- p_cab / (1 - p_cab)
+tibble(
+    Vinho = cenarios$Vinho,
+    `US\\$` = num(cenarios$brl / cambio, 1),
+    `$\\hat P(\\text{90+})$` = pct(p_cab),
+    `Chance` = num(chance_cab, 3),
+    `OR vs. 1ª linha` = num(chance_cab / chance_cab[1], 2)
+) |>
+    tab(align = "lrrrr", size = 8) |>
+    row_spec(1, bold = TRUE)
+```
+
+\vspace{0.2cm}
+
+\begin{block}{OR no modelo de chances proporcionais}
+\[
+\text{OR} = \frac{\hat P_1/(1-\hat P_1)}{\hat P_0/(1-\hat P_0)} = \exp\{(\mathbf{x}_1 - \mathbf{x}_0)^\top\hat{\boldsymbol\beta}\}
+\qquad\text{(igual em todos os cortes)}
+\]
+\end{block}
+
+\centering\tiny Câmbio: R\$ `r num(cambio, 2)` por US\$. Brasil tem `r sum(wine$country == "Brazil")` vinhos na base e, na nossa classificação, está em ``Outros países''.
 
 ## Frases equivocadas
 
