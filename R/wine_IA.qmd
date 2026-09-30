@@ -17,7 +17,7 @@ format:
     controls: true
     progress: true
     center: false
-    embed-resources: false
+    embed-resources: true
 execute:
   echo: false
   warning: false
@@ -712,18 +712,18 @@ $$u_{\text{provador}} \sim \mathcal{N}(0, \sigma_u^2)$$
 
 ::: {.column width="55%"}
 ::: {.card-kpi}
-<div class="kpi-title">1. Regularização contra Quase-Separação</div>
+<div class="kpi-title">Regularização contra Quase-Separação</div>
 <div class="kpi-desc">Priors informativas impedem estimativas degeneradas (+∞) em castas raras.</div>
 :::
 
 ::: {.card-kpi}
-<div class="kpi-title">2. Empréstimo de Força Estatística</div>
-<div class="kpi-desc">Shrinkage compartilha informação entre regiões abundantes e pequenos produtores.</div>
+<div class="kpi-title">Empréstimo de Força Estatística (Shrinkage)</div>
+<div class="kpi-desc">Compartilhamento de informação entre regiões abundantes e pequenos produtores.</div>
 :::
 
 ::: {.card-kpi}
-<div class="kpi-title">3. Inferência Exata via MCMC</div>
-<div class="kpi-desc">Intervalos HPD exatos para quantidades não-lineares sem aproximações de Wald.</div>
+<div class="kpi-title">Inferência Exata via MCMC</div>
+<div class="kpi-desc">Intervalos HPD exatos para quantidades não-lineares sem aproximações assintóticas de Wald.</div>
 :::
 :::
 :::

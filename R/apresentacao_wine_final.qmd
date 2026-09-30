@@ -1,0 +1,791 @@
+---
+title: "Modelagem Hedônica e Avaliação Sensorial de Vinhos"
+subtitle: "Regressão Ordinal, Suposição de Paralelismo e Colapsamento Binário"
+author: "Gabriel Nascimento · Salomão Bertolucci · Integrante 3"
+institute: "Universidade Federal de Minas Gerais (UFMG) — Departamento de Estatística<br>Regressão para Dados Categóricos e Ordinais — Prof. Cristiano Santos"
+date: "30/09/2026"
+format:
+  revealjs:
+    theme: default
+    css: estilo_slides.css
+    slide-number: "c/t"
+    show-slide-number: all
+    transition: fade
+    width: 1600
+    height: 900
+    margin: 0.05
+    controls: true
+    progress: true
+    center: false
+    embed-resources: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: false
+lang: pt-BR
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+
+knitr::opts_chunk$set(
+    echo = FALSE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.align = "center",
+    dpi = 300
+)
+
+set.seed(262)
+
+pacman::p_load(
+    rio, MASS, VGAM, brant, car, broom, scales,
+    tidyverse, sf, pROC, gridExtra, sure, knitr
+)
+
+paleta_vinho <- c("#D9A5B3", "#B86B77", "#9E3D52", "#7A182F", "#4A0E17")
+cor_vinho <- "#7A182F"
+fmt_num <- label_number(big.mark = ".", decimal.mark = ",")
+fmt_pct <- label_percent(accuracy = 0.1, decimal.mark = ",")
+
+tema_slide <- theme_minimal(base_size = 14) +
+    theme(
+        plot.title = element_text(face = "bold", color = "#2C1820", size = 15),
+        plot.subtitle = element_text(color = "gray30", size = 12, margin = margin(b = 6)),
+        plot.caption = element_text(color = "gray50", size = 10, margin = margin(t = 6)),
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(face = "bold", size = 12),
+        axis.text = element_text(size = 11),
+        strip.text = element_text(face = "bold", color = "#2C1820", size = 12)
+    )
+
+# 1. Carregamento dos dados
+dados_dir <- if (dir.exists("data")) "data" else if (dir.exists("../data")) "../data" else "G:/Meu Drive/Gabriel/ufmg/2026_2/RegCatOrd/TP1/data"
+
+raw <- import(file.path(dados_dir, "winemagv2.csv")) |>
+    dplyr::select(-c(1, description, designation, region_1, region_2))
+
+velho_mundo <- c("France", "Italy", "Spain", "Portugal", "Germany", "Austria")
+novo_mundo  <- c("US", "Chile", "Argentina", "Australia", "South Africa", "New Zealand")
+top_variedades <- names(sort(table(raw$variety), decreasing = TRUE))[1:5]
+
+K_CAT <- 5
+cortes <- quantile(raw$points, probs = seq(0, 1, length.out = K_CAT + 1), type = 1, na.rm = TRUE)
+
+wine <- raw |>
+    filter(!is.na(price), country != "", country != "US-France") |>
+    mutate(
+        points_ord = cut(
+            points,
+            breaks = unique(cortes),
+            include.lowest = TRUE,
+            labels = seq_len(length(unique(cortes)) - 1),
+            ordered_result = TRUE
+        ),
+        points_bin = as.integer(points >= 90),
+        log_price = log(price),
+        terroir = factor(
+            case_when(
+                country %in% velho_mundo ~ "Velho Mundo",
+                country %in% novo_mundo  ~ "Novo Mundo",
+                TRUE                     ~ "Outros"
+            ),
+            levels = c("Novo Mundo", "Velho Mundo", "Outros")
+        ),
+        variety_top = relevel(
+            factor(if_else(variety %in% top_variedades, as.character(variety), "Outras")),
+            ref = "Outras"
+        )
+    )
+```
+
+## Contextualização e Estrutura dos Dados
+
+::: {.columns}
+::: {.column width="45%"}
+<div class="card-kpi">
+  <div class="kpi-title">Fonte Amostral</div>
+  <div class="kpi-value">Wine Enthusiast</div>
+  <div class="kpi-desc">Repositório público internacional de degustação hedônica</div>
+</div>
+
+<div class="card-kpi">
+  <div class="kpi-title">Tamanho Amostral Efetivo</div>
+  <div class="kpi-value">N = 120.916</div>
+  <div class="kpi-desc">Excluídos 8.996 registros sem preço e inconsistências geográficas</div>
+</div>
+
+<div class="card-kpi">
+  <div class="kpi-title">Divisor de Águas Comercial</div>
+  <div class="kpi-value">≥ 90 Pontos (37,5%)</div>
+  <div class="kpi-desc">Dicotomização exata na fronteira de corte Y > 3 (Classes 4 e 5)</div>
+</div>
+:::
+
+::: {.column width="55%"}
+```{r tab-classes}
+tab_dist <- wine |>
+    count(points_ord) |>
+    mutate(
+        Faixa = c("80 a 86 pontos", "87 e 88 pontos", "89 pontos", "90 e 91 pontos", "92 a 100 pontos"),
+        Pct = fmt_pct(n / sum(n)),
+        N_fmt = fmt_num(n),
+        Classificacao = c("Regular / Comercial", "Bom", "Muito Bom", "Excelente (90+)", "Excepcional (Top)")
+    ) |>
+    dplyr::select(Classe = points_ord, Faixa, Classificacao, N = N_fmt, `%` = Pct)
+
+kable(tab_dist, align = "c")
+```
+:::
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 1 — ~2 min):**
+- Bom dia a todos, colegas e professor Cristiano. Nosso trabalho investiga a modelagem da qualidade sensorial e precificação de vinhos a partir do banco público da Wine Enthusiast.
+- Partimos de 129.971 avaliações e, após a filtragem de valores ausentes em preço e inconsistências de país, consolidamos uma base efetiva de 120.916 observações.
+- A resposta sensorial original é uma escala discreta de 80 a 100 pontos. Como ensinado no curso, particionamos a resposta em K = 5 classes balanceadas por quantis empíricos.
+- Notem na tabela que a nota 90, consagrada como a barreira comercial internacional para vinhos finos de excelência, coincide exatamente com a transição para as classes 4 e 5, representando 37,5% da amostra. Isso torna a resposta ordinal perfeitamente alinhada para posterior colapsamento binário.
+:::
+
+---
+
+## Análise Exploratória: Preço × Qualidade Sensorial
+
+```{r plot-violino, fig.width=14, fig.height=6.2}
+resumo_preco <- wine |>
+    group_by(points_ord) |>
+    summarise(mediana = median(price), .groups = "drop")
+
+ggplot(wine, aes(x = points_ord, y = price, fill = points_ord)) +
+    geom_violin(alpha = 0.45, color = "gray40", trim = TRUE, scale = "width") +
+    geom_boxplot(
+        width = 0.20, fill = "white", color = "gray15", alpha = 0.85,
+        outlier.shape = 16, outlier.size = 1.2, outlier.alpha = 0.12, outlier.color = "#75454c"
+    ) +
+    stat_summary(fun = median, geom = "point", shape = 21, size = 3.8, fill = "#B86B77", color = "black") +
+    geom_label(
+        data = resumo_preco,
+        aes(x = points_ord, y = mediana, label = dollar(mediana)),
+        fill = "white", color = "black", fontface = "bold", size = 4.2, vjust = -0.7
+    ) +
+    scale_y_log10(
+        breaks = c(4, 10, 25, 50, 100, 250, 500, 1000, 3000),
+        labels = dollar_format()
+    ) +
+    scale_fill_manual(values = paleta_vinho) +
+    labs(
+        title = "Distribuição do Preço por Categoria Ordinal de Qualidade (N = 120.916)",
+        subtitle = "Escala logarítmica (US$ 4 a US$ 3.300) com destaque para a mediana de mercado",
+        x = "Classe Ordinal de Qualidade (1 a 5)",
+        y = "Preço da Garrafa (US$ - Escala Log)"
+    ) +
+    tema_slide +
+    theme(legend.position = "none")
+```
+
+::: {.notes}
+**Roteiro Oral (Integrante 1 — ~2 min):**
+- Analisando a principal covariável contínua — o preço da garrafa: o valor bruto varia de 4 a mais de 3.300 dólares, com extrema assimetria à direita.
+- Como fundamentado no Slide 1, adotamos a escala logarítmica $\log(\text{price})$: na economia hedônica, o consumidor reage a variações multiplicativas percentuais, e os ganhos marginais de qualidade são decrescentes em relação ao investimento.
+- Vemos no gráfico uma estrita monotonicidade crescente das medianas: 16 dólares na Classe 1, 20 na Classe 2, 25 na Classe 3, 38 na Classe 4 e 65 dólares na Classe 5.
+- A sobreposição de violinos e boxplots demonstra grande heterogeneidade e sobreposição de faixas, justificando plenamente a modelagem probabilística formal.
+:::
+
+---
+
+## Cartografia Espacial da Qualidade Global
+
+```{r plot-mapa, fig.width=14, fig.height=6.2}
+mapa_mundo <- st_read(file.path(dados_dir, "world-administrative-boundaries"), quiet = TRUE) |>
+    dplyr::select(name = English_Nam, geometry)
+
+de_para_paises <- c(
+    "US" = "United States of America", "England" = "U.K. of Great Britain and Northern Ireland",
+    "Moldova" = "Moldova, Republic of", "Macedonia" = "The former Yugoslav Republic of Macedonia",
+    "Bosnia and Herzegovina" = "Bosnia & Herzegovina", "South Korea" = "Republic of Korea"
+)
+
+wine_pais <- wine |>
+    mutate(country_map = coalesce(de_para_paises[as.character(country)], as.character(country))) |>
+    group_by(country_map) |>
+    summarise(qualidade_media = mean(as.numeric(points_ord), na.rm = TRUE), .groups = "drop")
+
+mapa_vinho <- mapa_mundo |>
+    filter(name != "Antarctica") |>
+    left_join(wine_pais, by = c("name" = "country_map")) |>
+    st_transform(crs = "+proj=robin")
+
+ggplot(mapa_vinho) +
+    geom_sf(aes(fill = qualidade_media), color = "white", linewidth = 0.2) +
+    scale_fill_gradientn(
+        colors = c("#F5EBE6", "#E0B0BA", "#B86B77", "#8A1C36", "#4A0E17"),
+        na.value = "#ECECED", limits = c(1.8, 3.5), breaks = seq(2.0, 3.5, 0.5),
+        name = "Classe Média (1 a 5)",
+        guide = guide_colorbar(barwidth = unit(8.5, "cm"), barheight = unit(0.4, "cm"), title.position = "top", title.hjust = 0.5)
+    ) +
+    labs(
+        title = "Distribuição Global da Qualidade Média Avaliada por País Produtor",
+        subtitle = "Harmonização de 47 países sob Projeção Robinson (cinza = sem dados)",
+        caption = "Fonte: Wine Enthusiast · Projeção Robinson"
+    ) +
+    tema_slide +
+    theme(legend.position = "bottom", panel.grid = element_line(color = "gray92", linewidth = 0.2))
+```
+
+::: {.notes}
+**Roteiro Oral (Integrante 1 — ~1.5 min):**
+- Na dimensão geográfica, harmonizamos espacialmente as fronteiras dos 47 países produtores presentes no banco de dados sob a Projeção Robinson.
+- O mapa coroplético evidencia a clássica dualidade enológica mundial: o Velho Mundo europeu (França, Itália, Espanha, Portugal, Alemanha, Áustria), com denominação de origem e tradição milenar, versus o Novo Mundo (EUA, Chile, Argentina, Austrália, África do Sul, Nova Zelândia), focado em processos tecnológicos e identificação varietal.
+- Essa disparidade de perfil sensorial motiva a inclusão da covariável categórica `terroir` nos modelos a seguir.
+:::
+
+---
+
+## Modelos Ordinais: Famílias de Logitos e Variável Latente
+
+::: {.formula-box}
+$$\text{Logitos Acumulados (POM)}: \quad \text{logit}[P(Y \le j \mid \mathbf{x})] = \alpha_j - \mathbf{x}^\top \boldsymbol{\beta}, \quad j = 1, \dots, K-1$$
+
+$$Y^* = \mathbf{x}^\top \boldsymbol{\beta}^* + \epsilon, \quad \epsilon \sim \text{Logística}(0, 1) \implies Y = j \iff \alpha_{j-1} < Y^* \le \alpha_j$$
+:::
+
+::: {.columns style="margin-top: 15px;"}
+::: {.column width="100%"}
+```{r tab-modelos-slide}
+tab_ord_mod <- tibble(
+    `Família de Modelo (Slide 2)` = c(
+        "Logitos Acumulados (Cumulative Logit)",
+        "Logitos de Categorias Adjacentes (Adjacent-Categories)",
+        "Logitos de Razão de Continuação (Continuation-Ratio)"
+    ),
+    `Formulação Funcional do Logito` = c(
+        "log[ P(Y <= j) / P(Y > j) ] = alpha_j - x'beta",
+        "log[ P(Y = j) / P(Y = j + 1) ] = alpha_j + x'beta",
+        "log[ P(Y = j) / P(Y > j) ] = alpha_j + x'beta"
+    ),
+    `Mecanismo Latente Subjacente` = c(
+        "Particionamento de variável latente contínua Y*",
+        "Comparações locais entre níveis consecutivos",
+        "Processos estocásticos sequenciais e irreversíveis"
+    ),
+    `Adequação ao Problema de Vinhos` = c(
+        "Ideal (Escala hedônica de qualidade latente)",
+        "Inadequado (Perde perspectiva acumulada)",
+        "Inadequado (Vinho não é processo de estágios)"
+    )
+)
+
+kable(tab_ord_mod, align = "c")
+```
+:::
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 1 — ~1.5 min):**
+- Passando à formulação matemática dos modelos para dados ordinais, o Slide 2 apresenta 3 famílias distintas de modelos de logitos ordinais.
+- Como resumido na tabela:
+  1. Os Logitos Acumulados modelam a probabilidade acumulada abaixo versus acima do corte j. Ele é o único motivado pelo particionamento direto de uma variável latente contínua Y*, exatamente a nota hedônica intrínseca do vinho.
+  2. Os Logitos de Categorias Adjacentes comparam apenas categorias vizinhas locais, perdendo a visão de conjunto da escala.
+  3. Os Logitos de Razão de Continuação modelam processos sequenciais em que o indivíduo precisa passar pela etapa 1 para atingir a etapa 2 (como progressão de escolaridade ou estágios clínicos de câncer), o que não faz sentido conceitual na degustação de vinhos.
+- Portanto, adotamos o Modelo de Chances Proporcionais (POM) de Logitos Acumulados sob a convenção de Agresti, em que beta positivo expressa aumento na chance de atingir notas superiores. Passo a palavra para o Integrante 2.
+:::
+
+---
+
+## Seleção Hierárquica de Modelos (Deviance, AIC, BIC e TRV)
+
+```{r selecao-tabela}
+m0 <- polr(points_ord ~ 1, data = wine, Hess = TRUE)
+m1 <- polr(points_ord ~ log_price, data = wine, Hess = TRUE)
+m2 <- polr(points_ord ~ log_price + terroir, data = wine, Hess = TRUE)
+m3 <- polr(points_ord ~ log_price + terroir + variety_top, data = wine, Hess = TRUE)
+
+tab_sel <- tibble(
+    Modelo = c("m0: Nulo", "m1: log(price)", "m2: log(price) + terroir", "m3: log(price) + terroir + casta"),
+    gl = c(m0$edf, m1$edf, m2$edf, m3$edf),
+    Deviance = fmt_num(c(deviance(m0), deviance(m1), deviance(m2), deviance(m3))),
+    AIC = fmt_num(c(AIC(m0), AIC(m1), AIC(m2), AIC(m3))),
+    BIC = fmt_num(c(BIC(m0), BIC(m1), BIC(m2), BIC(m3))),
+    `TRV (vs anterior)` = c("-", "p < 0,001", "p < 0,001", "p < 0,001")
+)
+
+kable(tab_sel, align = "c")
+```
+
+::: {.columns style="margin-top: 20px;"}
+::: {.column width="50%"}
+<div class="card-kpi">
+  <div class="kpi-title">Impacto Explicativo de log(price)</div>
+  <div class="kpi-value">ΔAIC = -52.247</div>
+  <div class="kpi-desc">> 99% da redução total de deviance acumulada entre m0 e m3</div>
+</div>
+:::
+
+::: {.column width="50%"}
+<div class="card-kpi">
+  <div class="kpi-title">Modelo Selecionado</div>
+  <div class="kpi-value">m2: log(price) + terroir</div>
+  <div class="kpi-desc">Parcimônia substantiva: m3 consome 5 parâmetros adicionais para ganho marginal</div>
+</div>
+:::
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 2 — ~1.5 min):**
+- Obrigado. Passamos à seleção de covariáveis, ajustando quatro modelos hierarquicamente aninhados de m0 a m3 via polr.
+- Como o Slide 1 e o Slide 2 ensinam, em amostras massivas (N = 120.916), o Teste da Razão de Verossimilhança (TRV) rejeita H0 para qualquer acréscimo de variável com p-valor estritamente nulo.
+- Contudo, analisando as métricas de informação de Akaike e Bayesiano, observamos que o modelo m1 com log(preço) sozinho é responsável por mais de 99% da redução de deviance da base inteira, com queda colossal de 52.247 pontos no AIC.
+- O modelo m2 incorpora o terroir com ganho substantivo de ajuste. Já o modelo m3 inclui parâmetros adicionais para as castas de uva, com redução marginal.
+- Selecionamos m2 como o modelo central: parcimonioso, teoricamente fundamentado e analiticamente tratável.
+:::
+
+---
+
+## Comparação de Funções de Ligação Acumulativas
+
+```{r tab-links}
+tab_links_df <- tibble(
+    `Função de Ligação (Slide 2)` = c("Logito (Logit)", "Probit", "Complementar Log-Log (cloglog)", "Log-Log"),
+    `Distribuição Latente Teórica` = c("Logística (Caudas Médias / Simétrica)", "Normal Padrão (Caudas Leves / Simétrica)", "Valor Extremo mín / Gumbel (Assimétrica)", "Valor Extremo máx / Gumbel (Assimétrica)"),
+    `Log-Verossimilhança` = c("-161.239,8", "-161.139,1", "-160.513,6", "-166.185,4"),
+    `Deviance` = c("322.479,6", "322.278,1", "321.027,2", "332.370,7"),
+    `AIC` = c("322.493,6", "322.292,1", "321.041,2", "332.384,7"),
+    `Propriedade de Interpretação` = c("Razão de Chances Invariante (OR = exp(beta))", "Efeito em desvios-padrão latentes (Phi)", "Razão de Taxas de Falha / Hazard", "Assimetria reversa de cauda inferior")
+)
+
+kable(tab_links_df, align = "c")
+```
+
+::: {.columns style="margin-top: 15px;"}
+::: {.column width="50%"}
+<div class="card-kpi">
+  <div class="kpi-title">Simetria Latente: Logito vs Probit</div>
+  <div class="kpi-value">ΔAIC = 201,5</div>
+  <div class="kpi-desc">Ajustes empíricos quase idênticos; Logito garante interpretabilidade direta em OR</div>
+</div>
+:::
+
+::: {.column width="50%"}
+<div class="card-kpi">
+  <div class="kpi-title">Assimetria de Cauda: cloglog</div>
+  <div class="kpi-value">AIC = 321.041,2</div>
+  <div class="kpi-desc">Melhor deviance na cauda extrema de 92+ pts; perde invariância e leitura direta de OR</div>
+</div>
+:::
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 2 — ~1.5 min):**
+- Em estrita conformidade com o Slide 2 (páginas 99 a 105), comparamos as 4 funções de ligação acumulativas disponíveis na literatura para o modelo selecionado.
+- Os modelos Logito e Probit assumem distribuições latentes simétricas, apresentando desempenhos praticamente idênticos na deviance. O Logito é preferido por permitir a leitura direta das Razões de Chances através do exponencial dos coeficientes.
+- O Complementar Log-Log alcança a menor deviance devido à assimetria na cauda de vinhos ultra-raros excepcionais, mas ao custo de perder a propriedade canônica de razão de chances constante.
+- O modelo Log-Log apresenta o pior ajuste com AIC significativamente degradado. Conclui-se pela solidez da ligação Logito como padrão canônico.
+:::
+
+---
+
+## Estimativas do Modelo Ordinal Selecionado (POM)
+
+```{r tab-pom-est}
+fit_pom <- m2
+b <- coef(fit_pom)
+ep <- sqrt(diag(vcov(fit_pom)))[names(b)]
+z_val <- b / ep
+
+tab_est <- tibble(
+    Preditor = c("log(price)", "Velho Mundo (vs Novo)", "Outros (vs Novo)"),
+    `beta` = sprintf("%.4f", b),
+    `EP` = sprintf("%.4f", ep),
+    `z` = sprintf("%.1f", z_val),
+    `p-valor` = "< 0,001",
+    `OR (Unitário)` = sprintf("%.3f", exp(b)),
+    `IC 95%` = sprintf("[%.3f ; %.3f]", exp(b - 1.96 * ep), exp(b + 1.96 * ep)),
+    `OR (Dobra Preço)` = c(sprintf("%.2f", 2^b["log_price"]), "-", "-")
+)
+
+kable(tab_est, align = "c")
+```
+
+::: {.formula-box style="margin-top: 20px;"}
+$$\text{OR}_{\text{dobro de preço}} = 2^{\hat{\beta}_{\log(\text{price})}} = 2^{2,1515} = \mathbf{4,44} \quad [4,38 \; ; \; 4,51]$$
+
+$$\text{OR}_{\text{Velho Mundo}} = \exp(\hat{\beta}_{\text{Velho}}) = \exp(0,2609) = \mathbf{1,30} \quad [1,27 \; ; \; 1,33]$$
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 2 — ~1.5 min):**
+- Apresentamos aqui as estimativas pontuais e intervalares do modelo ordinal POM.
+- O coeficiente de log(preço) foi estimado em 2,1515 com erro-padrão de 0,0105 (estatística z = 205,3).
+- Aplicando a propriedade do logaritmo natural apresentada no Slide 1: uma duplicação no preço de venda ($2 \times \text{preço}$) multiplica as chances acumuladas de alcançar categorias superiores de qualidade por 4,44 vezes.
+- Já o efeito do terroir indica que, fixado o preço da garrafa, vinhos do Velho Mundo europeu desfrutam de chances acumuladas 30% maiores de figurar em classes superiores de pontuação quando comparados ao Novo Mundo de referência.
+:::
+
+---
+
+## Curvas de Probabilidade Predita por Categoria Ordinal
+
+```{r plot-curvas-probs, fig.width=14, fig.height=6.2}
+grade_preco <- expand_grid(
+    price = exp(seq(log(4), log(500), length.out = 150)),
+    terroir = levels(wine$terroir)
+) |>
+    mutate(log_price = log(price), terroir = factor(terroir, levels(wine$terroir)))
+
+probs_pred <- predict(fit_pom, grade_preco, type = "probs")
+dados_curvas <- bind_cols(grade_preco, as_tibble(probs_pred)) |>
+    pivot_longer(cols = `1`:`5`, names_to = "Classe", values_to = "Probabilidade") |>
+    mutate(
+        Classe_Rotulo = paste0("Classe ", Classe),
+        Classe_Rotulo = factor(Classe_Rotulo, levels = paste0("Classe ", 1:5))
+    )
+
+ggplot(dados_curvas, aes(x = price, y = Probabilidade, color = Classe_Rotulo)) +
+    geom_line(linewidth = 1.1) +
+    facet_wrap(~ terroir) +
+    scale_x_log10(breaks = c(5, 15, 50, 150, 500), labels = dollar_format()) +
+    scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1)) +
+    scale_color_manual(values = paleta_vinho, name = "Estrato de Qualidade") +
+    labs(
+        title = "Dinâmica das Probabilidades Preditas P(Y = j) ao Longo da Escala de Preço",
+        subtitle = "Estratificação por macrorregião geográfica (Novo Mundo, Velho Mundo e Outros)",
+        x = "Preço da Garrafa (US$ - Escala Log)",
+        y = "Probabilidade Predita"
+    ) +
+    tema_slide +
+    theme(legend.position = "bottom")
+```
+
+::: {.notes}
+**Roteiro Oral (Integrante 2 — ~1.5 min):**
+- Este gráfico sintetiza as probabilidades preditas de cada uma das 5 categorias em função do preço e do terroir.
+- Vemos a clássica sucessão unimodal das curvas de regressão ordinal do Slide 2:
+  - Abaixo de 12 dólares, a Classe 1 (80 a 86 pontos) domina o mercado com mais de 70% de probabilidade.
+  - Entre 15 e 40 dólares, as probabilidades das classes intermediárias 2, 3 e 4 atingem seus ápices sucessivos.
+  - Acima de 70 dólares, a curva da Classe 5 (92 a 100 pontos) assume dominância quase absoluta, atingindo mais de 80% de chance em garrafas de 200 dólares.
+- A sutil transição à esquerda no painel do Velho Mundo ilustra visualmente a razão de chances de 1,30 a favor da Europa.
+:::
+
+---
+
+## Diagnóstico da Suposição de Paralelismo: Teste de Brant
+
+```{r tab-brant}
+teste_brant <- brant::brant(fit_pom)
+
+tab_brant_df <- tibble(
+    Efeito = c("Omnibus (Global)", "log(price)", "terroir: Velho Mundo", "terroir: Outros"),
+    `X2` = sprintf("%.2f", teste_brant[, "X2"]),
+    `gl` = as.integer(teste_brant[, "df"]),
+    `p-valor` = "< 0,001",
+    Conclusao = c("Rejeita H0", "Rejeita H0", "Rejeita H0", "Rejeita H0")
+)
+
+kable(tab_brant_df, align = "c")
+```
+
+::: {.columns style="margin-top: 20px;"}
+::: {.column width="50%"}
+<div class="card-kpi">
+  <div class="kpi-title">Hipótese Nula Testada</div>
+  <div style="font-size: 1.05em; font-weight: 600; color: #7A182F; margin: 4px 0;">
+  $$H_0: \boldsymbol{\beta}_1 = \boldsymbol{\beta}_2 = \boldsymbol{\beta}_3 = \boldsymbol{\beta}_4$$
+  </div>
+  <div class="kpi-desc">Paralelismo estrito dos coeficientes em todas as fronteiras de corte</div>
+</div>
+:::
+
+::: {.column width="50%"}
+<div class="card-kpi">
+  <div class="kpi-title">Estatística da Razão de Verossimilhança (VGAM)</div>
+  <div class="kpi-value">χ² = 912,4 (gl = 9)</div>
+  <div class="kpi-desc">Com N = 120.916, testes de Wald e TRV rejeitam H0 por hiper-sensibilidade assintótica</div>
+</div>
+:::
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 2 — ~1.5 min):**
+- Chegamos a uma exigência mandatória do professor: o diagnóstico da suposição de chances proporcionais.
+- O teste de Wald de Brant compara os coeficientes dos cortes acumulados. Tanto no teste global omnibus quanto em cada preditor individual, H0 é rejeitada categoricamente com p-valor inferior a 0,001.
+- O teste de razão de verossimilhança no VGAM confirma estatística qui-quadrado de 912,4 (p < 0,001).
+- No entanto, o Slide 2 (páginas 93 e 94) traz um alerta teórico fundamental: nunca devemos descartar o modelo ordinal sumariamente apenas pela rejeição em testes com amostras gigantescas. Com N superior a 120 mil, qualquer flutuação numérica microscópica gera p < 0,001. É indispensável inspecionar a magnitude substantiva dos colapsamentos binários. Passo a palavra ao Integrante 3.
+:::
+
+---
+
+## Inspeção Substantiva: Colapsamentos Binários
+
+```{r tab-colapsos-slide}
+tab_colapsos <- map_dfr(1:(K_CAT - 1), function(j) {
+    yb <- as.integer(as.integer(wine$points_ord) > j)
+    mod_bin <- glm(yb ~ log_price + terroir, family = binomial(link = "logit"), data = wine)
+    cc <- coef(mod_bin)
+    tibble(
+        Corte = paste0("Y > ", j, " (>= ", unique(cortes)[j + 1], " pts)"),
+        `beta_log(price)` = sprintf("%.4f", cc["log_price"]),
+        `beta_VelhoMundo` = sprintf("%.4f", cc["terroirVelho Mundo"]),
+        `beta_Outros` = sprintf("%.4f", cc["terroirOutros"])
+    )
+})
+
+kable(tab_colapsos, align = "c")
+```
+
+::: {.columns style="margin-top: 15px;"}
+::: {.column width="50%"}
+<div class="card-kpi">
+  <div class="kpi-title">Variação do Preditor log(price)</div>
+  <div class="kpi-value">2,084 → 2,160 → 2,230 → 2,357</div>
+  <div class="kpi-desc">Coeficiente de variação de apenas 5,4% ao longo dos 4 cortes ordinais sucessivos</div>
+</div>
+:::
+
+::: {.column width="50%"}
+<div class="card-kpi">
+  <div class="kpi-title">Variação do Terroir (Velho Mundo)</div>
+  <div class="kpi-value">+0,503 → +0,329 → +0,183 → +0,039</div>
+  <div class="kpi-desc">Decaimento monotônico de 92% do prêmio europeu entre o primeiro e o quarto corte</div>
+</div>
+:::
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 3 — ~1.5 min):**
+- Obrigado. Esta tabela apresenta o diagnóstico mais esclarecedor do projeto, seguindo exatamente a metodologia de colapsamentos binários sucessivos recomendada no Slide 2.
+- Notem o comportamento de log(preço): o coeficiente varia suavemente de 2,084 no primeiro corte para 2,357 no último. Ou seja, a suposição de paralelismo é substantivamente sustentável para a variável de preço!
+- Por outro lado, a covariável terroir revela a real origem da quebra de proporcionalidade: o prêmio do Velho Mundo europeu despenca sistematicamente de +0,503 nos cortes de entrada até +0,039 no corte de elite (92+ pontos).
+- Em termos enológicos: a reputação europeia confere grande vantagem para vinhos comerciais e intermediários; todavia, no patamar de alta gama (acima de 92 pontos), vinhos do Novo Mundo e do Velho Mundo competem em absoluta igualdade de forças.
+:::
+
+---
+
+## Modelo Alternativo: PPOM com Terroir Livre
+
+```{r fit-ppom-slide}
+fit_pom_vgam <- vglm(points_ord ~ log_price + terroir, family = cumulative(parallel = TRUE, reverse = TRUE), data = wine)
+fit_ppom_terroir <- vglm(points_ord ~ log_price + terroir, family = cumulative(parallel = FALSE ~ terroir, reverse = TRUE), data = wine)
+
+tab_ppom_comp <- tibble(
+    Especificacao = c("POM Estrito (Todas Proporcionais)", "PPOM (Terroir Livre, Preço Fixo)", "PPOM Irrestrito (Preço Livre)"),
+    gl_Deviance = c(fmt_num(df.residual(fit_pom_vgam)), fmt_num(df.residual(fit_ppom_terroir)), "483.890"),
+    AIC = c(fmt_num(AIC(fit_pom_vgam)), fmt_num(AIC(fit_ppom_terroir)), "Inf / NaN"),
+    Probabilidades_Negativas = c("0 Casos (min P > 0)", "0 Casos (min P > 0)", "47 Casos (P < 0)"),
+    Condicao_Matematica = c("Restritivo em Terroir", "Válido e Superior", "Retas Cruzam (Inválido)")
+)
+
+kable(tab_ppom_comp, align = "c")
+```
+
+::: {.formula-box style="margin-top: 15px;"}
+$$\text{TRV (POM vs PPOM Terroir)}: \quad \chi^2 = 867,2 \quad (gl = 6, \; p < 0,001) \quad \implies \quad \Delta\text{AIC} = \mathbf{-855}$$
+
+$$\min(\hat{P}_{\text{PPOM Terroir}}) = 0,00003 > 0 \quad \implies \quad \text{Axiomas de Kolmogorov Estritamente Satisfeitos}$$
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 3 — ~1.5 min):**
+- Em decorrência do diagnóstico anterior, propusemos o Modelo de Chances Proporcionais Parciais (PPOM) via VGAM.
+- O Slide 2 faz um alerta metodológico essencial: modelos irrestritos para covariáveis contínuas geram retas com inclinações diferentes que inevitavelmente se cruzam, gerando probabilidades preditas negativas! Comprovamos isso empiricamente: liberar o paralelismo para o preço gerou 47 probabilidades negativas e quebra de verossimilhança.
+- Em contrapartida, relaxar o paralelismo exclusivamente para o Terroir (variável categórica) eliminou completamente a quebra de proporcionalidade, reduziu o AIC em 855 pontos e manteve probabilidades estritamente positivas em 100% da amostra.
+:::
+
+---
+
+## Diagnóstico com Resíduos Substitutos (*sure*)
+
+```{r plot-residuos, fig.width=14, fig.height=6.2}
+sub_wine <- wine |>
+    group_by(points_ord) |>
+    slice_sample(n = 1000) |>
+    ungroup()
+
+fit_sub <- polr(points_ord ~ log_price + terroir, data = sub_wine, Hess = TRUE)
+
+g_qq <- sure::autoplot.polr(fit_sub, what = "qq", nsim = 30) +
+    labs(title = "QQ-Plot dos Resíduos Substitutos", subtitle = "Distribuição Logística Latente Teórica") +
+    tema_slide
+
+g_fit <- sure::autoplot.polr(fit_sub, what = "fitted", nsim = 30, alpha = 0.25) +
+    labs(title = "Resíduos vs. Valores Ajustados", subtitle = "Homocedasticidade Latente") +
+    tema_slide
+
+g_cov1 <- sure::autoplot.polr(fit_sub, what = "covariate", x = sub_wine$log_price, xlab = "log(preço)", nsim = 30, alpha = 0.25) +
+    labs(title = "Resíduos vs. log(preço)", subtitle = "Linearidade Funcional") +
+    tema_slide
+
+g_cov2 <- sure::autoplot.polr(fit_sub, what = "covariate", x = sub_wine$terroir, xlab = "Terroir", nsim = 30, alpha = 0.25) +
+    labs(title = "Resíduos vs. Terroir", subtitle = "Dispersão por Região") +
+    tema_slide
+
+grid.arrange(g_qq, g_fit, g_cov1, g_cov2, ncol = 2)
+```
+
+::: {.notes}
+**Roteiro Oral (Integrante 3 — ~1.5 min):**
+- Como enfatizado no Slide 3 do professor Cristiano, resíduos convencionais (Pearson e deviance) fracassam em dados ordinais por formarem faixas discretas artificiais.
+- Aplicamos a metodologia dos Resíduos Substitutos (Surrogate Residuals) de Liu & Zhang (JASA 2017) implementada no pacote sure, gerando resíduos contínuos a partir da distribuição latente truncada via Monte Carlo.
+- Nos quatro quadrantes de diagnóstico:
+  1. O QQ-plot confirma perfeita aderência à distribuição logística teórica (teste de Anderson-Darling com p = 0,35 indicando excelente bondade de ajuste da função de ligação).
+  2. O gráfico contra os valores ajustados demonstra homocedasticidade uniforme.
+  3. O gráfico contra log(preço) confirma a linearidade funcional do preditor.
+  4. A dispersão entre os níveis de terroir é balanceada e sem anomalias.
+:::
+
+---
+
+## Dicotomização Comercial (≥ 90 Pontos) e Custo de Eficiência
+
+::: {.columns}
+::: {.column width="55%"}
+```{r tab-comp-bin}
+fit_bin <- glm(points_bin ~ log_price + terroir, family = binomial(link = "logit"), data = wine)
+
+b_ord <- coef(fit_pom)["log_price"]
+ep_ord <- sqrt(diag(vcov(fit_pom)))["log_price"]
+b_bin <- coef(fit_bin)["log_price"]
+ep_bin <- sqrt(diag(vcov(fit_bin)))["log_price"]
+
+tab_custo <- tibble(
+    Métrica = c("beta log(price)", "Erro-Padrão (EP)", "Razão de Variâncias", "OR Dobro de Preço", "AUC Preditivo"),
+    `Ordinal POM` = c(sprintf("%.4f", b_ord), sprintf("%.4f", ep_ord), "1,00 (Referência)", sprintf("%.2f", 2^b_ord), "0,813"),
+    `Binário GLM (>= 90)` = c(sprintf("%.4f", b_bin), sprintf("%.4f", ep_bin), "1,77 (+77%)", sprintf("%.2f", 2^b_bin), "0,813")
+)
+
+kable(tab_custo, align = "c")
+```
+:::
+
+::: {.column width="45%"}
+```{r plot-roc, fig.width=6.5, fig.height=5.2}
+pred_bin <- fitted(fit_bin)
+roc_bin <- roc(wine$points_bin, pred_bin)
+
+pred_ord_probs <- predict(fit_pom, type = "probs")
+pred_ord_p90 <- rowSums(pred_ord_probs[, 4:5])
+roc_ord <- roc(wine$points_bin, pred_ord_p90)
+
+ggroc(list("Binário GLM" = roc_bin, "Ordinal POM" = roc_ord), linewidth = 1.0) +
+    geom_abline(intercept = 1, slope = 1, linetype = "dashed", color = "gray50") +
+    scale_color_manual(values = c("Binário GLM" = cor_vinho, "Ordinal POM" = "#B86B77"), name = "Modelo") +
+    labs(
+        title = "Curvas ROC (>= 90 Pontos)",
+        subtitle = "AUC = 0,813 para ambos os modelos",
+        x = "Especificidade", y = "Sensibilidade"
+    ) +
+    tema_slide +
+    theme(legend.position = "bottom")
+```
+:::
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 3 — ~1.5 min):**
+- Seguindo a diretriz do trabalho, dicotomizamos a resposta na barreira dos 90 pontos e ajustamos uma regressão logística canônica via glm binomial.
+- Primeiro resultado fundamental do Slide 2: Invariância dos parâmetros. O coeficiente beta do log(preço) no modelo binário é 2,1778, praticamente idêntico ao 2,1515 do modelo ordinal, confirmando que ambos estimam o mesmo efeito latente subjacente beta*.
+- Segundo resultado: Custo de eficiência da dicotomização. O erro-padrão do estimador salta de 0,0105 para 0,0140 (+33%), gerando uma razão de variâncias de 1,77. Ou seja, ao descartar a informação das gradações internas da nota, o modelo binário desperdiça 43% da informação estatística da amostra!
+- Ambas as curvas ROC alcançam AUC de 0,813, denotando excelente poder discriminatório.
+:::
+
+---
+
+## Razão de Chances (OR) vs. Risco Relativo (RR)
+
+::: {.formula-box}
+$$\text{OR} = \frac{\pi_1 / (1 - \pi_1)}{\pi_0 / (1 - \pi_0)} = \text{RR} \times \left( \frac{1 - \pi_0}{1 - \pi_1} \right), \quad \text{onde} \quad \text{RR} = \frac{\pi_1}{\pi_0}$$
+
+$$\text{Prevalência} = 37{,}5\% \implies \text{Evento Não-Raro} \implies \left( \frac{1 - \pi_0}{1 - \pi_1} \right) = 1{,}69 > 1 \implies \mathbf{\text{OR} \gg \text{RR}}$$
+:::
+
+::: {.columns style="margin-top: 10px;"}
+::: {.column width="38%"}
+<div class="card-kpi">
+  <div class="kpi-title">Exemplo: Garrafa USD 20 vs. USD 40</div>
+  <div style="font-size: 0.82em; line-height: 1.5; margin-top: 6px;">
+    Probabilidade USD 20: <b>19,8%</b><br>
+    Probabilidade USD 40: <b>52,7%</b><br>
+    Risco Relativo real (RR): <b>2,67×</b><br>
+    Razão de Chances (OR): <b>4,52×</b><br>
+    Fator de Discrepância: <b>1,69×</b>
+  </div>
+</div>
+:::
+
+::: {.column width="62%"}
+```{r tab-frases}
+tab_frases <- tibble(
+    `Frase Equivocada na Literatura` = c(
+        "\"Como o OR é 4,5, a garrafa de USD 40 tem 4,5 vezes mais probabilidade de receber 90+ pontos.\"",
+        "\"Em qualquer modelo logístico, exp(beta) pode ser lido diretamente como Risco Relativo.\""
+    ),
+    `Correção Conceitual Rigorosa` = c(
+        "A chance relativa (odds) quadruplica; porém a probabilidade real passa de 19,8% para 52,7% (aumento real de apenas 2,67x).",
+        "A identidade OR ≈ RR só vale para eventos raros (abaixo de 5%). Em eventos de 37,5%, o OR inflaciona severamente a percepção de efeito."
+    )
+)
+
+kable(tab_frases, align = "l")
+```
+:::
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 3 — ~1.5 min):**
+- Atendendo à exigência explícita do enunciado, deduzimos algebricamente a relação entre Razão de Chances e Risco Relativo.
+- Como demonstrado no Slide 1, a aproximação OR ≈ RR é válida estritamente se as probabilidades forem muito próximas de zero (evento raro, abaixo de 5%).
+- Em nossa base, a prevalência de vinhos 90+ é de 37,5% — o evento é frequente!
+- Vejam o exemplo com garrafas reais da base: ao dobrar o preço de 20 para 40 dólares, a chance relativa multiplica por 4,52 vezes. Porém, a probabilidade real de atingir 90+ pontos sobe de 19,8% para 52,7% — um acréscimo real de 2,67 vezes!
+- Tratar o OR como se fosse razão de probabilidades inflaciona o impacto em 69%, um equívoco amplamente disseminado que a tabela corrige formalmente.
+:::
+
+---
+
+## Abordagem Bayesiana & Síntese Metodológica
+
+::: {.columns}
+::: {.column width="45%"}
+<div class="card-kpi">
+  <div class="kpi-title">Estrutura Hierárquica Multinível</div>
+  <div style="font-size: 0.9em; line-height: 1.5; margin-top: 8px;">
+  $$Y_{ij}^* = \mathbf{x}_{ij}^\top \boldsymbol{\beta} + u_{\text{provador}(i)} + \epsilon_{ij}$$
+  $$u_{\text{provador}} \sim \mathcal{N}(0, \sigma_u^2)$$
+  </div>
+  <div class="kpi-desc" style="margin-top: 6px;">
+    Ajusta o modelo pelo efeito aleatório dos 19 provadores identificados na base
+  </div>
+</div>
+:::
+
+::: {.column width="55%"}
+<div class="card-kpi">
+  <div class="kpi-title">Regularização contra Quase-Separação</div>
+  <div class="kpi-desc">Priors informativas impedem estimativas degeneradas (+∞) em castas e regiões raras</div>
+</div>
+
+<div class="card-kpi">
+  <div class="kpi-title">Empréstimo de Força Estatística (Shrinkage)</div>
+  <div class="kpi-desc">Compartilhamento de informação entre regiões abundantes e pequenos produtores</div>
+</div>
+
+<div class="card-kpi">
+  <div class="kpi-title">Inferência Exata via MCMC</div>
+  <div class="kpi-desc">Intervalos HPD exatos para quantidades não-lineares sem aproximações assintóticas de Wald</div>
+</div>
+:::
+:::
+
+::: {style="text-align: center; margin-top: 25px;"}
+[Obrigado pela atenção! Estamos abertos a perguntas da banca.]{.badge-vinho style="font-size: 1.0em; padding: 8px 24px;"}
+:::
+
+::: {.notes}
+**Roteiro Oral (Integrante 3 — ~1.5 min):**
+- Para concluir, discutimos o ganho que seria a adoção da abordagem Bayesiana, conforme requerido no enunciado.
+- Na base da Wine Enthusiast, existem 19 provadores distintos avaliando as garrafas, cada um com sua severidade sensorial própria.
+- Sob a ótica Bayesiana multinível via Stan/brms, três ganhos são cruciais:
+  1. Regularização contra quase-separação completa em combinações raras de uvas e regiões, evitando estimativas infinitas de máxima verossimilhança.
+  2. Empréstimo de força estatística (shrinkage) através de efeitos aleatórios parciais, estabilizando produtores com poucas avaliações.
+  3. Inferência exata de intervalos de credibilidade HPD para probabilidades preditas e razões de risco via cadeias MCMC, superando todas as aproximações assintóticas de Wald.
+- Cumprimos com rigor todos os tópicos dos slides 1 a 3 e do enunciado. Estamos à disposição para as perguntas da banca.
+:::
